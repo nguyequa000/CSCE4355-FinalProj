@@ -38,8 +38,8 @@ The proposal's six alert rules, six shop tables, Grafana dashboard, Docker Compo
 The pipeline was run end to end on `shopdb`; the evidence is committed under `docs/results/live/`.
 One alert opened and resolved:
 
-| Moment | Time (CST) | Source |
-|---|---|---|
+| Moment | Source |
+|---|---|
 | Lock injected: PID 35164 waits on PID 42028 (`lock_demo_blocker`, idle in transaction) | `docs/results/live/lock_demo.log` |
 | Wait start stored by the collector (`first_seen_at`) | `docs/results/live/alert_sql.txt` |
 | Threshold crossed (`eligible_at`, +30 s) | `docs/results/live/alert_sql.txt` |
