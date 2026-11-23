@@ -419,3 +419,21 @@ def test_dead_tuple_risk_empty_table_sample_is_unknown_not_clean(admin):
     rows = alerts(admin)
     assert len(rows) == 1
     assert rows[0]["resolved_at"] is None
+
+
+# --------------------------------------------------------------------------- #
+# pipeline wiring: the real collector must reach these rules
+# --------------------------------------------------------------------------- #
+def test_collector_pipeline_reaches_the_more_rules(admin):
+    """capture_snapshot() -> evaluate_alerts() -> evaluate_more_rules(), and
+    capture_snapshot() -> collect_extra() (fills table_stat_sample for dead_tuple_risk).
+
+    The other tests call evaluate_more_rules() directly; without this check the
+    rules can pass every test and still never fire from the scheduled collector.
+    """
+    def body(signature: str) -> str:
+        return admin.execute("SELECT pg_get_functiondef(%s::regprocedure)",
+                             (signature,)).fetchone()[0]
+
+    assert "evaluate_more_rules" in body("monitor.evaluate_alerts(bigint)")
+    assert "collect_extra" in body("monitor.capture_snapshot()")

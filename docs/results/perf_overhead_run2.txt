@@ -1,0 +1,195 @@
+Collector overhead -- pgbench, shopdb_bench
+Started: 2026-11-23 00:53:43 CST
+Server: PostgreSQL 17.12 on x86_64-windows, compiled by msvc-19.44.35230, 64-bit
+pgbench: pgbench (PostgreSQL) 17.12
+Design: 6 runs interleaved off,on,off,on,off,on; re-init (pgbench -i -s 10 -q)
+        before EVERY run; each run: pgbench -c 8 -j 4 -T 60 -n -P 10.
+        'on' = scripts/collect.py --interval 10 --db shopdb_bench in background
+        for the whole run (10 s is more aggressive than the 60 s default).
+NOTE: background processes on this host (a laptop, not a dedicated server) may add noise; runs are
+      interleaved to spread noise, and no statistical significance is claimed.
+
+------------------------------------------------------------------
+RUN 1  mode=off  tps=5971.125002  snapshots_in_window=n/a
+--- pgbench raw output ---
+pgbench (17.12)
+progress: 10.0 s, 5907.0 tps, lat 1.341 ms stddev 0.491, 0 failed
+progress: 20.0 s, 6026.3 tps, lat 1.327 ms stddev 0.342, 0 failed
+progress: 30.0 s, 6043.4 tps, lat 1.323 ms stddev 0.366, 0 failed
+progress: 40.0 s, 5913.8 tps, lat 1.352 ms stddev 0.373, 0 failed
+progress: 50.0 s, 6023.6 tps, lat 1.328 ms stddev 0.264, 0 failed
+progress: 60.0 s, 5857.1 tps, lat 1.365 ms stddev 0.404, 0 failed
+transaction type: <builtin: TPC-B (sort of)>
+scaling factor: 10
+query mode: simple
+number of clients: 8
+number of threads: 4
+maximum number of tries: 1
+duration: 60 s
+number of transactions actually processed: 357801
+number of failed transactions: 0 (0.000%)
+latency average = 1.339 ms
+latency stddev = 0.379 ms
+initial connection time = 93.372 ms
+tps = 5971.125002 (without initial connection time)
+pgbench exit: 0
+
+------------------------------------------------------------------
+RUN 2  mode=on  tps=6644.502308  snapshots_in_window=7
+window: 2026-11-23 00:54:47.884321-06 .. 2026-11-23 00:55:51.167399-06
+collector winpid: 25952
+--- pgbench raw output ---
+pgbench (17.12)
+progress: 10.0 s, 6731.9 tps, lat 1.178 ms stddev 0.367, 0 failed
+progress: 20.0 s, 6781.6 tps, lat 1.179 ms stddev 0.286, 0 failed
+progress: 30.0 s, 6198.9 tps, lat 1.290 ms stddev 1.031, 0 failed
+progress: 40.0 s, 6739.1 tps, lat 1.187 ms stddev 0.345, 0 failed
+progress: 50.0 s, 6790.7 tps, lat 1.178 ms stddev 0.254, 0 failed
+progress: 60.0 s, 6571.4 tps, lat 1.217 ms stddev 0.332, 0 failed
+transaction type: <builtin: TPC-B (sort of)>
+scaling factor: 10
+query mode: simple
+number of clients: 8
+number of threads: 4
+maximum number of tries: 1
+duration: 60 s
+number of transactions actually processed: 398232
+number of failed transactions: 0 (0.000%)
+latency average = 1.203 ms
+latency stddev = 0.503 ms
+initial connection time = 82.111 ms
+tps = 6644.502308 (without initial connection time)
+--- collector stderr (tail) ---
+collector: db=shopdb_bench interval=10s count=unlimited
+pgbench exit: 0
+
+------------------------------------------------------------------
+RUN 3  mode=off  tps=6744.931873  snapshots_in_window=n/a
+--- pgbench raw output ---
+pgbench (17.12)
+progress: 10.0 s, 6638.2 tps, lat 1.195 ms stddev 0.555, 0 failed
+progress: 20.0 s, 6873.9 tps, lat 1.163 ms stddev 0.288, 0 failed
+progress: 30.0 s, 6893.5 tps, lat 1.160 ms stddev 0.270, 0 failed
+progress: 40.0 s, 6825.8 tps, lat 1.172 ms stddev 0.287, 0 failed
+progress: 50.0 s, 6520.1 tps, lat 1.226 ms stddev 0.372, 0 failed
+progress: 60.0 s, 6665.2 tps, lat 1.200 ms stddev 0.493, 0 failed
+transaction type: <builtin: TPC-B (sort of)>
+scaling factor: 10
+query mode: simple
+number of clients: 8
+number of threads: 4
+maximum number of tries: 1
+duration: 60 s
+number of transactions actually processed: 404195
+number of failed transactions: 0 (0.000%)
+latency average = 1.186 ms
+latency stddev = 0.393 ms
+initial connection time = 79.146 ms
+tps = 6744.931873 (without initial connection time)
+pgbench exit: 0
+
+------------------------------------------------------------------
+RUN 4  mode=on  tps=5444.030989  snapshots_in_window=7
+window: 2026-11-23 00:56:58.50968-06 .. 2026-11-23 00:58:01.81105-06
+collector winpid: 25172
+--- pgbench raw output ---
+pgbench (17.12)
+progress: 10.0 s, 6296.5 tps, lat 1.259 ms stddev 0.806, 0 failed
+progress: 20.0 s, 6662.4 tps, lat 1.200 ms stddev 0.467, 0 failed
+progress: 30.0 s, 6105.9 tps, lat 1.310 ms stddev 0.529, 0 failed
+progress: 40.0 s, 5772.3 tps, lat 1.385 ms stddev 0.685, 0 failed
+progress: 50.0 s, 3873.5 tps, lat 2.064 ms stddev 2.000, 0 failed
+progress: 60.0 s, 3908.2 tps, lat 2.047 ms stddev 3.329, 0 failed
+transaction type: <builtin: TPC-B (sort of)>
+scaling factor: 10
+query mode: simple
+number of clients: 8
+number of threads: 4
+maximum number of tries: 1
+duration: 60 s
+number of transactions actually processed: 326216
+number of failed transactions: 0 (0.000%)
+latency average = 1.469 ms
+latency stddev = 1.490 ms
+initial connection time = 84.464 ms
+tps = 5444.030989 (without initial connection time)
+--- collector stderr (tail) ---
+collector: db=shopdb_bench interval=10s count=unlimited
+pgbench exit: 0
+
+------------------------------------------------------------------
+RUN 5  mode=off  tps=5876.320219  snapshots_in_window=n/a
+--- pgbench raw output ---
+pgbench (17.12)
+progress: 10.0 s, 6232.3 tps, lat 1.272 ms stddev 0.405, 0 failed
+progress: 20.0 s, 5836.9 tps, lat 1.370 ms stddev 0.497, 0 failed
+progress: 30.0 s, 5957.3 tps, lat 1.343 ms stddev 0.467, 0 failed
+progress: 40.0 s, 5586.2 tps, lat 1.432 ms stddev 0.745, 0 failed
+progress: 50.0 s, 5952.6 tps, lat 1.343 ms stddev 0.312, 0 failed
+progress: 60.0 s, 5643.5 tps, lat 1.417 ms stddev 0.408, 0 failed
+transaction type: <builtin: TPC-B (sort of)>
+scaling factor: 10
+query mode: simple
+number of clients: 8
+number of threads: 4
+maximum number of tries: 1
+duration: 60 s
+number of transactions actually processed: 352105
+number of failed transactions: 0 (0.000%)
+latency average = 1.361 ms
+latency stddev = 0.491 ms
+initial connection time = 84.519 ms
+tps = 5876.320219 (without initial connection time)
+pgbench exit: 0
+
+------------------------------------------------------------------
+RUN 6  mode=on  tps=6210.179182  snapshots_in_window=7
+window: 2026-11-23 00:59:07.235867-06 .. 2026-11-23 01:00:10.551791-06
+collector winpid: 26712
+--- pgbench raw output ---
+pgbench (17.12)
+progress: 10.0 s, 5879.7 tps, lat 1.347 ms stddev 0.593, 0 failed
+progress: 20.0 s, 6053.1 tps, lat 1.321 ms stddev 0.405, 0 failed
+progress: 30.0 s, 6079.8 tps, lat 1.315 ms stddev 0.342, 0 failed
+progress: 40.0 s, 6488.2 tps, lat 1.233 ms stddev 0.349, 0 failed
+progress: 50.0 s, 6271.9 tps, lat 1.275 ms stddev 0.509, 0 failed
+progress: 60.0 s, 6430.1 tps, lat 1.244 ms stddev 0.326, 0 failed
+transaction type: <builtin: TPC-B (sort of)>
+scaling factor: 10
+query mode: simple
+number of clients: 8
+number of threads: 4
+maximum number of tries: 1
+duration: 60 s
+number of transactions actually processed: 372106
+number of failed transactions: 0 (0.000%)
+latency average = 1.288 ms
+latency stddev = 0.432 ms
+initial connection time = 93.942 ms
+tps = 6210.179182 (without initial connection time)
+--- collector stderr (tail) ---
+collector: db=shopdb_bench interval=10s count=unlimited
+pgbench exit: 0
+
+==================================================================
+SUMMARY (TPS excludes pgbench initial connection time)
+
+run   mode          tps    snapshots
+1     off   5971.125002          n/a
+2     on    6644.502308            7
+3     off   6744.931873          n/a
+4     on    5444.030989            7
+5     off   5876.320219          n/a
+6     on    6210.179182            7
+
+mean off TPS: 6197.46  (n=3)
+mean on  TPS: 6099.57  (n=3)
+difference (on vs off): -1.58 %
+
+Comparison method: plain mean of 3 collector-off vs 3 collector-on runs,
+interleaved off/on to spread background load; percentage = (mean_on -
+mean_off)/mean_off*100. This is an observed comparison only -- 3 runs per
+arm cannot support a significance claim, and background processes on a laptop may have added noise.
+Collector interval was 10 s (more aggressive than
+the 60 s default), so this bounds overhead conservatively for the demo.
+Finished: 2026-11-23 01:00:11 CST

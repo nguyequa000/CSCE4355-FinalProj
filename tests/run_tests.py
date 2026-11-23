@@ -79,8 +79,12 @@ def rebuild(databases: list[str]) -> bool:
         print("bash not found; run from Git Bash or rebuild the databases manually",
               file=sys.stderr)
         return False
+    from scripts.dbconf import connect
     for db in databases:
         print(f"rebuilding {db} ...", flush=True)
+        # setup_db.sh leaves an existing database in place, so drop it first
+        with connect("postgres", dbname="postgres", autocommit=True) as conn:
+            conn.execute(f'DROP DATABASE IF EXISTS "{db}" WITH (FORCE)')
         proc = subprocess.run([bash, "scripts/setup_db.sh", db], cwd=ROOT,
                               capture_output=True, text=True, env=clean_env())
         if proc.returncode != 0:
