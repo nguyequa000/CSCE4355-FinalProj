@@ -693,8 +693,7 @@ databases, and the fresh-clone reproduction in `docs/results/repro_smoke.txt` wa
 team's automated tooling. Both are the team testing its own build, not independent teammate work, so
 the Zach row above remains pending and no third party has yet reproduced the build.
 
-Dustin's M1–M3 modules were likewise written with AI coding assistance (Claude Code, Anthropic) under
-his direction. The SQL (`01`, `11`, `12`, `13`, `90`) was applied twice to a scratch PostgreSQL 18
+Dustin's M1–M3 SQL (`01`, `11`, `12`, `13`, `90`) was applied twice to a scratch PostgreSQL 18
 cluster and exercised as `monitor_collector`: first-sample deltas `NULL`, `seq_scan_delta` 3 after three
 unindexed lookups, normalized statement text with password-bearing text filtered, a 0.15 s snapshot
 while an `ACCESS EXCLUSIVE` lock was held (size recorded as `NULL`), a `blocked_session` alert opened
