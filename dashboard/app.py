@@ -16,6 +16,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -47,6 +48,10 @@ VIEWS = {
     "blockers": "monitor.v_current_blockers",
     "dbstats": "monitor.v_db_stats",
     "alerts": "monitor.v_alerts",
+    # optional history views (another lane owns them) — probed with to_regclass
+    "table_stats": "monitor.v_table_stats",
+    "statement_stats": "monitor.v_statement_stats",
+    "hourly_rollup": "monitor.v_hourly_rollup",
 }
 
 
@@ -69,9 +74,9 @@ def _q(conn, sql: str, params=None) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=5, show_spinner=False)
-def load_data(dbname: str, window: int) -> dict[str, pd.DataFrame]:
+def load_data(dbname: str, window: int) -> dict[str, Any]:
     """One reader connection per refresh; returns every table the page needs."""
-    out: dict[str, pd.DataFrame] = {}
+    out: dict[str, Any] = {}
     with connect(
         "monitor_reader",
         dbname=dbname,
@@ -83,6 +88,26 @@ def load_data(dbname: str, window: int) -> dict[str, pd.DataFrame]:
             "SELECT current_user AS connected_role, current_database() AS dbname, "
             "now() AS server_now",
         )
+        # Optional history views are created by another lane. Probe with
+        # to_regclass (never a direct SELECT) so a database without them still
+        # renders the original panels.
+        out["available"] = {
+            str(row.view_name): bool(row.present)
+            for row in _q(
+                conn,
+                "SELECT 'monitor.v_table_stats' AS view_name, "
+                "to_regclass('monitor.v_table_stats') IS NOT NULL AS present "
+                "UNION ALL SELECT 'monitor.v_statement_stats', "
+                "to_regclass('monitor.v_statement_stats') IS NOT NULL "
+                "UNION ALL SELECT 'monitor.v_hourly_rollup', "
+                "to_regclass('monitor.v_hourly_rollup') IS NOT NULL",
+            ).itertuples()
+        }
+        out["table_stats_latest"] = pd.DataFrame()
+        out["table_stats_history"] = pd.DataFrame()
+        out["statement_stats"] = pd.DataFrame()
+        out["hourly_rollup"] = pd.DataFrame()
+        out["dead_table_names"] = {}
         out["snapshot"] = _q(
             conn,
             "SELECT snapshot_id, captured_at FROM monitor.v_snapshot "
@@ -132,6 +157,69 @@ def load_data(dbname: str, window: int) -> dict[str, pd.DataFrame]:
             "FROM monitor.v_alerts WHERE status = 'resolved' "
             "ORDER BY resolved_at DESC NULLS LAST LIMIT 25",
         )
+
+        # Optional history panels: query each view only after to_regclass said
+        # it exists, so a database without the new views keeps working.
+        if out["available"].get("monitor.v_table_stats"):
+            out["table_stats_latest"] = _q(
+                conn,
+                "SELECT snapshot_id, captured_at, schemaname, relname, n_live_tup, "
+                "n_dead_tup, dead_ratio, seq_scan, idx_scan "
+                "FROM monitor.v_table_stats "
+                "WHERE snapshot_id = (SELECT max(snapshot_id) FROM monitor.v_table_stats) "
+                "ORDER BY n_dead_tup DESC NULLS LAST, schemaname, relname",
+            )
+            out["table_stats_history"] = _q(
+                conn,
+                "SELECT snapshot_id, captured_at, schemaname, relname, n_dead_tup "
+                "FROM monitor.v_table_stats WHERE snapshot_id = ANY(%s) "
+                "ORDER BY snapshot_id, schemaname, relname",
+                (list(ids),),
+            )
+            # dead_tuple_risk stores the table relid in blocked_pid. Resolve the
+            # name from the latest v_table_stats snapshot (matched via pg_class,
+            # since the view exposes schemaname/relname, not relid); fall back
+            # to the bare relid in the app when this returns nothing.
+            try:
+                refs = _q(
+                    conn,
+                    "SELECT a.alert_id, ts.relname "
+                    "FROM monitor.v_alerts a "
+                    "LEFT JOIN pg_class c ON c.oid::bigint = a.blocked_pid::bigint "
+                    "LEFT JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "LEFT JOIN LATERAL ("
+                    "  SELECT t.relname FROM monitor.v_table_stats t "
+                    "  WHERE t.snapshot_id = (SELECT max(snapshot_id) FROM monitor.v_table_stats) "
+                    "    AND t.schemaname = n.nspname AND t.relname = c.relname "
+                    "  LIMIT 1"
+                    ") ts ON true "
+                    "WHERE a.rule_name = 'dead_tuple_risk'",
+                )
+                out["dead_table_names"] = {
+                    int(row.alert_id): str(row.relname)
+                    for row in refs.itertuples()
+                    if row.relname is not None and not pd.isna(row.relname)
+                }
+            except Exception:  # optional label enrichment only; keep the page up
+                out["dead_table_names"] = {}
+
+        if out["available"].get("monitor.v_statement_stats"):
+            out["statement_stats"] = _q(
+                conn,
+                "SELECT snapshot_id, captured_at, queryid, calls_delta, "
+                "total_exec_time_delta, mean_exec_time "
+                "FROM monitor.v_statement_stats "
+                "WHERE snapshot_id = (SELECT max(snapshot_id) FROM monitor.v_statement_stats) "
+                "ORDER BY total_exec_time_delta DESC NULLS LAST, queryid LIMIT 20",
+            )
+
+        if out["available"].get("monitor.v_hourly_rollup"):
+            out["hourly_rollup"] = _q(
+                conn,
+                "SELECT hour, snapshots, max_lock_edges, max_sessions, "
+                "xact_commit_delta_sum, blks_hit_ratio, alerts_fired "
+                "FROM monitor.v_hourly_rollup ORDER BY hour DESC NULLS LAST LIMIT 48",
+            )
     return out
 
 
@@ -160,6 +248,54 @@ def age_seconds(ts) -> float | None:
 
 def num(x):
     return int(x) if x is not None and not pd.isna(x) else None
+
+
+ALERT_DB_RULES = {"connection_saturation", "cache_hit_ratio"}
+ALERT_PID_RULES = {"idle_in_transaction", "long_active_query"}
+
+
+def alert_target(rule_name, blocked_pid, blocker_pid, alert_id, dead_tables) -> str:
+    """Rule-aware human target for one alert row (never raises)."""
+    rule = str(rule_name) if rule_name is not None and not pd.isna(rule_name) else ""
+
+    def as_int(value):
+        return None if value is None or pd.isna(value) else int(value)
+
+    blocked, blocker = as_int(blocked_pid), as_int(blocker_pid)
+    alert = as_int(alert_id)
+
+    if rule == "blocked_session":
+        if blocked is not None and blocker is not None:
+            return f"pid {blocked} blocked by {blocker}"
+        return f"pid {blocked}" if blocked is not None else "—"
+    if rule in ALERT_PID_RULES:
+        return f"pid {blocked}" if blocked is not None else "—"
+    if rule == "dead_tuple_risk":
+        relname = dead_tables.get(alert) if alert is not None else None
+        if relname:
+            return f"table {relname}"
+        return f"table {blocked}" if blocked is not None else "table —"
+    if rule in ALERT_DB_RULES:
+        return "database"
+    # Unknown rule: infer from the PID convention used by v_alerts.
+    if blocked is not None and blocker is not None and blocker not in (0, blocked):
+        return f"pid {blocked} blocked by {blocker}"
+    if blocked is not None and blocked != 0:
+        return f"pid {blocked}"
+    return "database"
+
+
+def with_alert_target(df: pd.DataFrame, dead_tables: dict[int, str]) -> pd.DataFrame:
+    """Return a copy of an alerts frame with a `target` column after rule_name."""
+    if not len(df):
+        return df.assign(target=pd.Series(dtype="object"))
+    out = df.copy()
+    targets = [
+        alert_target(row.rule_name, row.blocked_pid, row.blocker_pid, row.alert_id, dead_tables)
+        for row in df.itertuples()
+    ]
+    out.insert(out.columns.get_loc("rule_name") + 1, "target", targets)
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -232,38 +368,58 @@ def render() -> None:
 
     # ---------------- 1. alerts ----------------
     st.subheader("1 · Alerts")
-    open_alerts = data["alerts_open"]
-    resolved = data["alerts_resolved"]
-    a1, a2 = st.columns([1, 1])
-    a1.metric("Open alerts", len(open_alerts))
-    a2.metric("Resolved alerts (shown)", len(resolved))
+    dead_tables = data.get("dead_table_names", {})
+    open_alerts = with_alert_target(data["alerts_open"], dead_tables)
+    resolved = with_alert_target(data["alerts_resolved"], dead_tables)
 
-    if len(open_alerts):
-        st.error(f"{len(open_alerts)} open alert(s) — blocking threshold currently exceeded.")
-        show = open_alerts.assign(
-            fired_at=open_alerts["fired_at"].map(ct),
-            first_seen_at=open_alerts["first_seen_at"].map(ct),
-            eligible_at=open_alerts["eligible_at"].map(ct),
-            notified_at=open_alerts["notified_at"].map(ct),
+    known_rules = sorted(
+        {str(x) for x in open_alerts["rule_name"].dropna()}
+        | {str(x) for x in resolved["rule_name"].dropna()}
+    )
+    picked_rules = known_rules
+    if known_rules:
+        picked_rules = st.multiselect(
+            "Filter alerts by rule_name",
+            known_rules,
+            default=known_rules,
+            key="alert_rule_filter",
+            help="Applies to both the open and resolved alert tables below.",
+        )
+    open_view = open_alerts[open_alerts["rule_name"].astype(str).isin(picked_rules)]
+    resolved_view = resolved[resolved["rule_name"].astype(str).isin(picked_rules)]
+
+    a1, a2 = st.columns([1, 1])
+    a1.metric("Open alerts", len(open_view))
+    a2.metric("Resolved alerts (shown)", len(resolved_view))
+
+    if len(open_view):
+        st.error(f"{len(open_view)} open alert(s) — blocking threshold currently exceeded.")
+        show = open_view.assign(
+            fired_at=open_view["fired_at"].map(ct),
+            first_seen_at=open_view["first_seen_at"].map(ct),
+            eligible_at=open_view["eligible_at"].map(ct),
+            notified_at=open_view["notified_at"].map(ct),
         )
         styled = show.style.apply(
             lambda _row: ["background-color: #5c1a1a"] * len(_row), axis=1
         )
         st.dataframe(styled, width="stretch", hide_index=True)
+    elif known_rules and len(picked_rules) != len(known_rules):
+        st.success("No open alerts match the selected rule filter.")
     else:
         st.success("No open alerts.")
 
     st.markdown("**Resolved alerts**")
-    if len(resolved):
-        show = resolved.assign(
-            fired_at=resolved["fired_at"].map(ct),
-            resolved_at=resolved["resolved_at"].map(ct),
-            notified_at=resolved["notified_at"].map(ct),
-            resolve_notified_at=resolved["resolve_notified_at"].map(ct),
+    if len(resolved_view):
+        show = resolved_view.assign(
+            fired_at=resolved_view["fired_at"].map(ct),
+            resolved_at=resolved_view["resolved_at"].map(ct),
+            notified_at=resolved_view["notified_at"].map(ct),
+            resolve_notified_at=resolved_view["resolve_notified_at"].map(ct),
         )
         st.dataframe(show, width="stretch", hide_index=True)
     else:
-        st.caption("No resolved alerts in `monitor.v_alerts`.")
+        st.caption("No resolved alerts match the current filter.")
 
     # ---------------- 2. current blockers ----------------
     st.subheader("2 · Current blockers")
@@ -350,6 +506,122 @@ def render() -> None:
             st.bar_chart(chart.set_index("snapshot")["xact_commit_delta"], height=200)
     else:
         st.info("No database counter samples in the selected window.")
+
+    # ---------------- 5. table health ----------------
+    st.subheader("5 · Table health")
+    if not data["available"].get("monitor.v_table_stats"):
+        st.info(
+            "Table health: `monitor.v_table_stats` **not available in this database** — "
+            "the optional history views have not been installed here."
+        )
+    else:
+        tables = data["table_stats_latest"]
+        if len(tables):
+            tables = tables.copy()
+            tables["table"] = tables["schemaname"].astype(str) + "." + tables["relname"].astype(str)
+            tables["dead_pct"] = tables["dead_ratio"].map(
+                lambda v: f"{float(v):.2%}" if pd.notna(v) else "—"
+            )
+            t1, t2, t3 = st.columns(3)
+            t1.metric("Tables in latest snapshot", len(tables))
+            t2.metric("Dead tuples (latest)", f"{int(tables['n_dead_tup'].fillna(0).sum()):,}")
+            t3.metric("Max dead ratio", f"{float(tables['dead_ratio'].fillna(0).max()):.2%}")
+            st.caption(
+                "Latest snapshot per table — live/dead tuples, dead ratio, "
+                "sequential vs index scans."
+            )
+            st.dataframe(
+                tables[["table", "n_live_tup", "n_dead_tup", "dead_pct", "seq_scan", "idx_scan"]],
+                width="stretch",
+                hide_index=True,
+            )
+
+            hist = data["table_stats_history"]
+            if len(hist):
+                hist = hist.copy()
+                hist["table"] = hist["schemaname"].astype(str) + "." + hist["relname"].astype(str)
+                top_tables = (
+                    tables.sort_values("n_dead_tup", ascending=False)["table"].head(6).tolist()
+                )
+                hist = hist[hist["table"].isin(top_tables)]
+                pivot = (
+                    hist.pivot_table(
+                        index=["snapshot_id", "captured_at"],
+                        columns="table",
+                        values="n_dead_tup",
+                        aggfunc="max",
+                    )
+                    .reset_index()
+                    .sort_values("snapshot_id")
+                )
+                chart_cols = [c for c in top_tables if c in pivot.columns]
+                if chart_cols:
+                    pivot["snapshot"] = [
+                        f"#{int(r.snapshot_id)} {ct(r.captured_at)[11:19]}"
+                        for r in pivot.itertuples()
+                    ]
+                    st.caption("Dead tuples over time (six tables with the most dead tuples)")
+                    st.line_chart(pivot.set_index("snapshot")[chart_cols], height=240)
+        else:
+            st.info("`monitor.v_table_stats` exists but has no samples yet.")
+
+    # ---------------- 6. top statements ----------------
+    st.subheader("6 · Top statements by total execution time")
+    if not data["available"].get("monitor.v_statement_stats"):
+        st.info(
+            "Top statements: `monitor.v_statement_stats` **not available in this database** — "
+            "the optional history views have not been installed here."
+        )
+    else:
+        stmt = data["statement_stats"]
+        if len(stmt):
+            show = stmt.copy()
+            show["queryid"] = show["queryid"].map(lambda v: str(int(v)) if pd.notna(v) else "—")
+            show["calls_delta"] = show["calls_delta"].map(
+                lambda v: f"{int(v):,}" if pd.notna(v) else "unknown"
+            )
+            show["total_exec_time_delta"] = show["total_exec_time_delta"].map(
+                lambda v: f"{float(v):,.1f} ms" if pd.notna(v) else "unknown"
+            )
+            show["mean_exec_time"] = show["mean_exec_time"].map(
+                lambda v: f"{float(v):,.3f} ms" if pd.notna(v) else "—"
+            )
+            st.caption(
+                "Latest snapshot only, ordered by `total_exec_time_delta`. "
+                "`queryid` only — the contract stores no SQL text."
+            )
+            st.dataframe(show, width="stretch", hide_index=True)
+
+            chart = stmt.dropna(subset=["total_exec_time_delta"]).head(10).copy()
+            if len(chart):
+                chart["label"] = chart["queryid"].map(lambda v: f"q{int(v)}")
+                st.caption("total_exec_time_delta (ms), top 10 queryids")
+                st.bar_chart(chart.set_index("label")["total_exec_time_delta"], height=220)
+        else:
+            st.info("`monitor.v_statement_stats` exists but has no samples in its latest snapshot.")
+
+    # ---------------- 7. hourly rollup ----------------
+    st.subheader("7 · Hourly rollup")
+    if not data["available"].get("monitor.v_hourly_rollup"):
+        st.info(
+            "Hourly rollup: `monitor.v_hourly_rollup` **not available in this database** — "
+            "the optional history views have not been installed here."
+        )
+    else:
+        roll = data["hourly_rollup"]
+        if len(roll):
+            show = roll.copy()
+            show["hour"] = show["hour"].map(ct)
+            show["blks_hit_ratio"] = show["blks_hit_ratio"].map(
+                lambda v: f"{float(v):.2%}" if pd.notna(v) else "unknown"
+            )
+            st.caption(
+                "Per-hour rollup (most recent first): snapshots, peak lock edges/sessions, "
+                "commit delta sum, block cache hit ratio, alerts fired."
+            )
+            st.dataframe(show, width="stretch", hide_index=True)
+        else:
+            st.info("`monitor.v_hourly_rollup` exists but has no hourly rows yet.")
 
     st.divider()
     st.caption(

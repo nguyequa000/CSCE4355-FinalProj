@@ -79,6 +79,105 @@ def bars(values: pd.Series, labels: pd.Series) -> str:
     return "".join(rows)
 
 
+def line_chart(df: pd.DataFrame, labels: pd.Series, height: int = 180) -> str:
+    """Small dependency-free SVG line chart: one line per column."""
+    if df.empty or not len(labels):
+        return '<p class="empty">no data</p>'
+    width, pad_l, pad_r, pad_t, pad_b = 760, 44, 12, 16, 28
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+    values = df.fillna(0).to_numpy(dtype=float)
+    top = max(1.0, float(values.max()))
+    n = max(1, len(df) - 1)
+    palette = ["#3f6fb5", "#b5533f", "#3f8f5a", "#8a5fb5", "#b5953f", "#3f8fb5"]
+    parts = [f'<svg viewBox="0 0 {width} {height}" width="100%" height="{height}" role="img">']
+    for frac in (0.25, 0.5, 0.75, 1.0):
+        y = pad_t + plot_h - frac * plot_h
+        parts.append(f'<line x1="{pad_l}" y1="{y:.0f}" x2="{width - pad_r}" y2="{y:.0f}" stroke="#e3e7ec"/>')
+        parts.append(
+            f'<text x="{pad_l - 6}" y="{y + 4:.0f}" text-anchor="end" font-size="10" '
+            f'fill="#68717f">{int(top * frac)}</text>'
+        )
+    for i, col in enumerate(df.columns):
+        color = palette[i % len(palette)]
+        pts = []
+        for j in range(len(df)):
+            x = pad_l + (plot_w * j / n)
+            y = pad_t + plot_h - (values[j, i] / top * plot_h)
+            pts.append(f"{x:.1f},{y:.1f}")
+        poly = " ".join(pts)
+        parts.append(f'<polyline fill="none" stroke="{color}" stroke-width="2" points="{poly}"/>')
+        for j, point in enumerate(pts):
+            x, y = point.split(",")
+            parts.append(
+                f'<circle cx="{x}" cy="{y}" r="2.5" fill="{color}">'
+                f"<title>{html.escape(str(col))}: {values[j, i]:.0f}</title></circle>"
+            )
+        lx = pad_l + i * 150
+        parts.append(f'<rect x="{lx}" y="2" width="10" height="10" fill="{color}"/>')
+        parts.append(
+            f'<text x="{lx + 14}" y="11" font-size="10" fill="#4a5464">'
+            f"{html.escape(str(col))}</text>"
+        )
+    for j in sorted({0, len(df) // 2, len(df) - 1}):
+        x = pad_l + (plot_w * j / n)
+        anchor = "start" if j == 0 else ("end" if j == len(df) - 1 else "middle")
+        parts.append(
+            f'<text x="{x:.0f}" y="{height - 8}" text-anchor="{anchor}" font-size="10" '
+            f'fill="#68717f">{html.escape(str(labels.iloc[j]))}</text>'
+        )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+ALERT_DB_RULES = {"connection_saturation", "cache_hit_ratio"}
+ALERT_PID_RULES = {"idle_in_transaction", "long_active_query"}
+
+
+def alert_target(rule_name, blocked_pid, blocker_pid, alert_id, dead_tables) -> str:
+    """Rule-aware target for one alert row (same mapping as dashboard/app.py)."""
+    rule = str(rule_name) if rule_name is not None and not pd.isna(rule_name) else ""
+
+    def as_int(value):
+        return None if value is None or pd.isna(value) else int(value)
+
+    blocked, blocker = as_int(blocked_pid), as_int(blocker_pid)
+    alert = as_int(alert_id)
+    if rule == "blocked_session":
+        if blocked is not None and blocker is not None:
+            return f"pid {blocked} blocked by {blocker}"
+        return f"pid {blocked}" if blocked is not None else "—"
+    if rule in ALERT_PID_RULES:
+        return f"pid {blocked}" if blocked is not None else "—"
+    if rule == "dead_tuple_risk":
+        relname = dead_tables.get(alert) if alert is not None else None
+        if relname:
+            return f"table {html.escape(str(relname))}"
+        return f"table {blocked}" if blocked is not None else "table —"
+    if rule in ALERT_DB_RULES:
+        return "database"
+    if blocked is not None and blocker is not None and blocker not in (0, blocked):
+        return f"pid {blocked} blocked by {blocker}"
+    if blocked is not None and blocked != 0:
+        return f"pid {blocked}"
+    return "database"
+
+
+def add_alert_targets(df: pd.DataFrame, dead_tables: dict[int, str]) -> pd.DataFrame:
+    if not len(df):
+        return df.assign(target=pd.Series(dtype="object"))
+    out = df.copy()
+    out.insert(
+        out.columns.get_loc("rule_name") + 1,
+        "target",
+        [
+            alert_target(r.rule_name, r.blocked_pid, r.blocker_pid, r.alert_id, dead_tables)
+            for r in df.itertuples()
+        ],
+    )
+    return out
+
+
 def main() -> int:
     env = load_env()
     ap = argparse.ArgumentParser()
@@ -139,6 +238,74 @@ def main() -> int:
             "ORDER BY resolved_at DESC NULLS LAST LIMIT 25"
         )
 
+        # Optional history views (owned by another lane): probe with to_regclass
+        # before selecting, so this fallback works on databases without them.
+        available = {
+            name: bool(q("SELECT to_regclass(%s) AS reg", (name,)).iloc[0]["reg"])
+            for name in (
+                "monitor.v_table_stats",
+                "monitor.v_statement_stats",
+                "monitor.v_hourly_rollup",
+            )
+        }
+
+        table_latest = pd.DataFrame()
+        table_history = pd.DataFrame()
+        statement_stats = pd.DataFrame()
+        hourly_rollup = pd.DataFrame()
+        dead_names: dict[int, str] = {}
+
+        if available["monitor.v_table_stats"]:
+            table_latest = q(
+                "SELECT snapshot_id, captured_at, schemaname, relname, n_live_tup, "
+                "n_dead_tup, dead_ratio, seq_scan, idx_scan FROM monitor.v_table_stats "
+                "WHERE snapshot_id = (SELECT max(snapshot_id) FROM monitor.v_table_stats) "
+                "ORDER BY n_dead_tup DESC NULLS LAST, schemaname, relname"
+            )
+            table_history = q(
+                "SELECT snapshot_id, captured_at, schemaname, relname, n_dead_tup "
+                "FROM monitor.v_table_stats WHERE snapshot_id = ANY(%s) "
+                "ORDER BY snapshot_id, schemaname, relname",
+                (ids,),
+            )
+            try:
+                refs = q(
+                    "SELECT a.alert_id, ts.relname FROM monitor.v_alerts a "
+                    "LEFT JOIN pg_class c ON c.oid::bigint = a.blocked_pid::bigint "
+                    "LEFT JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "LEFT JOIN LATERAL ("
+                    "  SELECT t.relname FROM monitor.v_table_stats t "
+                    "  WHERE t.snapshot_id = (SELECT max(snapshot_id) FROM monitor.v_table_stats) "
+                    "    AND t.schemaname = n.nspname AND t.relname = c.relname "
+                    "  LIMIT 1"
+                    ") ts ON true WHERE a.rule_name = 'dead_tuple_risk'"
+                )
+                dead_names = {
+                    int(row.alert_id): str(row.relname)
+                    for row in refs.itertuples()
+                    if row.relname is not None and not pd.isna(row.relname)
+                }
+            except Exception:  # optional label enrichment only
+                dead_names = {}
+
+        if available["monitor.v_statement_stats"]:
+            statement_stats = q(
+                "SELECT snapshot_id, captured_at, queryid, calls_delta, "
+                "total_exec_time_delta, mean_exec_time FROM monitor.v_statement_stats "
+                "WHERE snapshot_id = (SELECT max(snapshot_id) FROM monitor.v_statement_stats) "
+                "ORDER BY total_exec_time_delta DESC NULLS LAST, queryid LIMIT 20"
+            )
+
+        if available["monitor.v_hourly_rollup"]:
+            hourly_rollup = q(
+                "SELECT hour, snapshots, max_lock_edges, max_sessions, "
+                "xact_commit_delta_sum, blks_hit_ratio, alerts_fired "
+                "FROM monitor.v_hourly_rollup ORDER BY hour DESC NULLS LAST LIMIT 48"
+            )
+
+    open_a = add_alert_targets(open_a, dead_names)
+    res_a = add_alert_targets(res_a, dead_names)
+
     latest_id = int(snaps["snapshot_id"].iloc[0]) if len(snaps) else None
     latest_ts = snaps["captured_at"].iloc[0] if len(snaps) else None
     age = age_seconds(latest_ts)
@@ -176,6 +343,89 @@ def main() -> int:
         sess_html = piv.drop(columns=["snapshot_id"]).to_html(index=False, border=0, classes="tbl")
     else:
         sess_html = '<p class="empty">no session samples</p>'
+
+    # ---- optional history panels (5-7) ----
+    if not available["monitor.v_table_stats"]:
+        table_health_html = (
+            '<div class="banner warn">Table health: monitor.v_table_stats '
+            "not available in this database.</div>"
+        )
+    elif len(table_latest):
+        tl = table_latest.copy()
+        tl["table"] = tl["schemaname"].astype(str) + "." + tl["relname"].astype(str)
+        tl["dead_pct"] = tl["dead_ratio"].map(
+            lambda v: f"{float(v):.2%}" if pd.notna(v) else "—"
+        )
+        latest_html = fmt_table(
+            tl[["table", "n_live_tup", "n_dead_tup", "dead_pct", "seq_scan", "idx_scan"]]
+        )
+        if len(table_history):
+            hist = table_history.copy()
+            hist["table"] = hist["schemaname"].astype(str) + "." + hist["relname"].astype(str)
+            top_tables = tl.sort_values("n_dead_tup", ascending=False)["table"].head(6).tolist()
+            hist = hist[hist["table"].isin(top_tables)]
+            chart_piv = (
+                hist.pivot_table(
+                    index=["snapshot_id", "captured_at"], columns="table",
+                    values="n_dead_tup", aggfunc="max",
+                )
+                .reset_index()
+                .sort_values("snapshot_id")
+            )
+            chart_cols = [c for c in top_tables if c in chart_piv.columns]
+            if chart_cols:
+                labels = pd.Series([
+                    f"#{int(sid)} {ct(ts)[11:19]}"
+                    for sid, ts in zip(chart_piv["snapshot_id"], chart_piv["captured_at"])
+                ])
+                chart_html = line_chart(chart_piv[chart_cols], labels)
+            else:
+                chart_html = '<p class="empty">no dead-tuple history</p>'
+        else:
+            chart_html = '<p class="empty">no dead-tuple history</p>'
+        table_health_html = (
+            latest_html
+            + '<h3 style="font-size:13px;margin:14px 0 4px">Dead tuples over time</h3>'
+            + chart_html
+        )
+    else:
+        table_health_html = '<p class="empty">view exists but has no samples yet</p>'
+
+    if not available["monitor.v_statement_stats"]:
+        statement_html = (
+            '<div class="banner warn">Top statements: monitor.v_statement_stats '
+            "not available in this database.</div>"
+        )
+    elif len(statement_stats):
+        st_show = statement_stats.copy()
+        st_show["queryid"] = st_show["queryid"].map(lambda v: str(int(v)) if pd.notna(v) else "—")
+        st_show["calls_delta"] = st_show["calls_delta"].map(
+            lambda v: f"{int(v):,}" if pd.notna(v) else "unknown"
+        )
+        st_show["total_exec_time_delta"] = st_show["total_exec_time_delta"].map(
+            lambda v: f"{float(v):,.1f} ms" if pd.notna(v) else "unknown"
+        )
+        st_show["mean_exec_time"] = st_show["mean_exec_time"].map(
+            lambda v: f"{float(v):,.3f} ms" if pd.notna(v) else "—"
+        )
+        statement_html = fmt_table(st_show)
+    else:
+        statement_html = '<p class="empty">no statement samples in the latest snapshot</p>'
+
+    if not available["monitor.v_hourly_rollup"]:
+        hourly_html = (
+            '<div class="banner warn">Hourly rollup: monitor.v_hourly_rollup '
+            "not available in this database.</div>"
+        )
+    elif len(hourly_rollup):
+        roll_show = hourly_rollup.copy()
+        roll_show["hour"] = roll_show["hour"].map(ct)
+        roll_show["blks_hit_ratio"] = roll_show["blks_hit_ratio"].map(
+            lambda v: f"{float(v):.2%}" if pd.notna(v) else "unknown"
+        )
+        hourly_html = fmt_table(roll_show)
+    else:
+        hourly_html = '<p class="empty">no hourly rows</p>'
 
     css = """
     :root{color-scheme:light dark}
@@ -234,8 +484,16 @@ def main() -> int:
 {sess_html}
 <h3 style="font-size:13px;margin:14px 0 4px">Database counters (delta = unknown means no comparable previous sample)</h3>
 {fmt_table(stats, time_cols=('captured_at',), unknown_cols=('xact_commit_delta','xact_rollback_delta','blks_read_delta','blks_hit_delta'))}
+<h2>5 · Table health</h2>
+{table_health_html}
+<h2>6 · Top statements by total execution time</h2>
+<p class="sub" style="margin:0 0 6px">Latest snapshot, ordered by total_exec_time_delta · queryid only (no SQL text is stored).</p>
+{statement_html}
+<h2>7 · Hourly rollup</h2>
+{hourly_html}
 <footer>Source: monitor.v_snapshot, v_session_history, v_lock_history, v_current_blockers,
-v_db_stats, v_alerts as monitor_reader (SELECT only). Streamlit replacement of dashboard/app.py.</footer>
+v_db_stats, v_alerts — plus v_table_stats, v_statement_stats, v_hourly_rollup when present —
+as monitor_reader (SELECT only). Streamlit replacement of dashboard/app.py.</footer>
 </body></html>"""
 
     out = Path(args.out)
