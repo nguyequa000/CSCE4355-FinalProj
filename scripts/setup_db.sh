@@ -33,7 +33,7 @@ PSQL=(psql -h "$PGHOST" -p "$PGPORT" -U "$PG_SUPERUSER" -v ON_ERROR_STOP=1 -q)
 
 "${PSQL[@]}" -d postgres -v dbname="$DB" -v app_pw="$SHOP_APP_PASSWORD" \
   -v collector_pw="$MONITOR_COLLECTOR_PASSWORD" -v reader_pw="$MONITOR_READER_PASSWORD" -f sql/00_roles.sql
-# every numbered script after 00_roles.sql, in name order (01 shop, 10-13 monitor
+# every numbered script after 00_roles.sql, in name order (01 shop, 10-14 monitor
 # schema/collector/purge, 20-21 alerts, 90 pg_cron jobs) -- the same order the
 # Docker init script (docker/postgres/initdb/10_project_init.sh) uses
 for f in sql/[0-9][0-9]_*.sql; do

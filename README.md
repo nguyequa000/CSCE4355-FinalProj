@@ -293,7 +293,7 @@ env -u PGPASSWORD -u PG_SUPERUSER -u PGHOST -u PGPORT -u PGDATABASE \
     .venv/Scripts/python.exe -m pytest tests -v
 ```
 
-The suite is four files and 29 tests: `tests/test_capture.py` (3 tests: unattended snapshots with
+The suite is six files. The recorded run below covered four of them (29 tests): `tests/test_capture.py` (3 tests: unattended snapshots with
 distinct timestamps, lock-edge destroyed-but-kept history, delta correctness),
 `tests/test_privileges.py` (6 tests: reader allowed on every view, reader denied on base tables and
 `shop`, app denied on `monitor`), `tests/test_alert.py` (9 tests: threshold eligibility, one open
@@ -305,6 +305,9 @@ rule). The full suite on freshly dropped and recreated test databases is `29 pas
 (`tests/test_extra_rules.py`) and `9 passed in 3.47s` (`tests/test_alert.py`) in
 `docs/results/t5_extra_rules_pytest.txt`; `9 passed in 0.68s` (`docs/results/t2_pytest.txt`, capture
 + privileges) and `9 passed in 3.28s` (`docs/results/t3_pytest.txt`, alert).
+
+`tests/test_more_rules.py` covers the three rules in `sql/22_more_rules.sql` (connection saturation,
+cache hit ratio, dead-tuple risk); like `test_history.py` it postdates the recorded run.
 
 `tests/test_history.py` (7 tests, M1–M3, runs on `shopdb_t2`) adds: six shop tables with the
 intentional missing index and consistent order totals, `pg_monitor` membership, every history table
@@ -359,6 +362,7 @@ Final_Project/
 ├── scripts/
 │   ├── start_cluster.sh          initdb (first run) + start/stop disposable PG17 cluster
 │   ├── setup_db.sh               roles, database, shop seed, monitor schema, summary
+│   ├── bench_overhead.sh         collector overhead benchmark (pgbench, collector on/off)
 │   ├── collect.py                60 s scheduler: calls monitor.capture_snapshot() (+ alerts)
 │   └── dbconf.py                 .env-driven psycopg 3 connection helper
 ├── sql/
@@ -368,17 +372,25 @@ Final_Project/
 │   ├── 11_monitor_history.sql    statement/table/index history + reader views — M2
 │   ├── 12_capture_snapshot.sql   monitor.capture_snapshot() collector — M3
 │   ├── 13_purge.sql              monitor.purge_old_snapshots(interval) — M3
+│   ├── 14_history.sql            table/statement sample tables, collect_extra(), v_* rollup views
 │   ├── 20_alerts.sql             monitor.evaluate_alerts() — blocked_session rule
 │   ├── 21_extra_rules.sql        idle_in_transaction and long_active_query rules
+│   ├── 22_more_rules.sql         connection_saturation, cache_hit_ratio, dead_tuple_risk rules
+│   ├── 30_missing_index_demo.sql missing-index demonstration
 │   └── 90_cron_jobs.sql          pg_cron schedule (no-op without pg_cron) — M3
 ├── workload/
 │   ├── lock_demo.py              two-session row-lock contention generator
+│   ├── session_demo.py           idle-in-transaction / long-query session generator
+│   ├── stress_demo.py            load generator for the stress scenario
 │   └── seed_data.py              proposal-scale synthetic shop data (Faker, COPY) — M1
 ├── notifier/
 │   └── notify.py                 console notifier for alert_log
 ├── dashboard/
-│   └── app.py                    Streamlit dashboard (monitor_reader)
-├── tests/                        pytest suite (29 recorded tests + test_history.py, 7, not yet run)
+│   ├── app.py                    Streamlit dashboard (monitor_reader)
+│   ├── static_report.py          static HTML snapshot of the dashboard
+│   └── dev_fixtures*.sql         development fixtures
+├── tests/                        pytest suite: test_capture, test_privileges, test_alert,
+│                                 test_extra_rules, test_more_rules, test_history
 ├── docs/
 │   ├── results/                  captured evidence (see §7)
 │   │   ├── live/                 collector/notifier/demo logs, alert SQL, dashboard renders
@@ -387,23 +399,24 @@ Final_Project/
 │       ├── report.md             technical report source
 │       ├── build_report.py       report.md -> TeamName_Final_Project_Report.docx
 │       └── figures/              architecture.png, dashboard.png (Figure 2)
-└── Tonight_Build_Plan.md         build plan and scope decisions
 ```
 
 ## 9. Status of alert rules
 
-`blocked_session`, `idle_in_transaction` and `long_active_query` are verified live in this build —
-3 of the 6 proposed rules. A rule is called **verified** only when a captured run shows the alert
-opening and resolving.
+`blocked_session`, `idle_in_transaction` and `long_active_query` are verified live in this build.
+`connection_saturation`, `cache_hit_ratio` and `dead_tuple_risk` are implemented in
+`sql/22_more_rules.sql` and covered by `tests/test_more_rules.py`, but have no captured live run yet,
+so they are not counted as verified. A rule is called **verified** only when a captured run shows
+the alert opening and resolving.
 
 | Rule (proposal §8.2) | Threshold | Severity | Status |
 |---|---|---|---|
 | Blocked sessions | wait ≥ 30 s | critical | **Verified (live)** — alert 1 opened 21:43:25.214 and resolved 21:45:25.208 (`docs/results/live/alert_sql.txt`) |
 | Idle in transaction | > 60 s | warning | **Verified (live, 30 s cadence)** — alert 1 opened 21:55:05.198, 60.605 s after injection (0.604 s after eligibility), resolved 21:56:05.192, 20.602 s after the session ended (`docs/results/t5_extra_rules_live.txt`) |
 | Long-running query | active > 60 s | warning | **Verified (live, 30 s cadence)** — alert 2 opened 21:57:44.958, 60.562 s after the query started (0.561 s after eligibility), resolved 21:58:44.953, 20.555 s after the session ended (same file) |
-| Connection saturation | > 80 % of `max_connections` | critical | Not implemented |
-| Low cache hit ratio | < 95 % over 5 min | warning | Not implemented |
-| Table bloat risk | dead tuples > 20 % of live tuples | info | Not implemented |
+| Connection saturation | ≥ 80 % of `max_connections` | warning | Implemented (`sql/22_more_rules.sql`); no live run captured |
+| Low cache hit ratio | < 90 % over 5 min (≥ 100 blocks) | warning | Implemented (`sql/22_more_rules.sql`); no live run captured |
+| Table bloat risk | ≥ 1000 dead tuples and dead/(live+dead) ≥ 20 % | warning | Implemented as `dead_tuple_risk` (`sql/22_more_rules.sql`); no live run captured |
 
 The two extra rules are implemented in `sql/21_extra_rules.sql` as
 `monitor.evaluate_extra_rules(snapshot_id)`, called from `monitor.evaluate_alerts()` when the
@@ -426,7 +439,7 @@ Disclosed deviations from the approved proposal (all of them also appear in repo
 | Dashboard | Provisioned Grafana | Streamlit app on port 8501 (Grafana service available under a Compose profile, unprovisioned) |
 | Shop schema | 6 tables, ~100k customers / ~1M orders | 6 tables, **1,000 / 10,000** deterministic rows by default; `workload/seed_data.py` for proposal scale (not yet run) |
 | History | Session, statement, table, index, lock and database history; hourly rollup; retention | All six histories and a 7-day purge function (M2/M3); no hourly rollup |
-| Alert rules | 6 | 3 of 6 verified live (`blocked_session`, `idle_in_transaction`, `long_active_query`); saturation, cache ratio and bloat not implemented |
+| Alert rules | 6 | 6 implemented; 3 verified live (`blocked_session`, `idle_in_transaction`, `long_active_query`); saturation, cache ratio and dead-tuple risk (`sql/22_more_rules.sql`) have tests but no captured live run; thresholds and severities differ from the proposal (see §9) |
 | Overhead | `< 5 %` pgbench impact | **Not measured** |
 | Recording | Required video | **Outstanding** |
 
