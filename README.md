@@ -4,20 +4,6 @@
 Historical metrics collection, threshold-based alerting, and a read-only dashboard for a simulated
 online store.
 
-| Team member | Role |
-|---|---|
-| Quan Nguyen | Integration and build: cluster provisioning, schema, collector/alert integration, dashboard, live evidence run, report assembly |
-| Dustin Dowell | Proposed: independent reproducibility smoke test and environment/results paragraph — *pending, actual work product to be filled in* |
-| Zach Riggle | Proposed: independent privilege / alert-resolution test — *pending, actual work product to be filled in* |
-
-> Quan's implementation and the report were produced with AI agent assistance (Hermes Agent, Nous
-> Research), which drafted code and SQL, ran the build and test commands, captured the evidence
-> files and assembled the document under his direction. It is disclosed as tooling, not as a team
-> member.
-
-> The recorded demonstration required by the submission guidelines has **not** been produced yet.
-> This repository and the technical report are the deliverables that exist.
-
 ## 1. Purpose
 
 PostgreSQL's statistics views (`pg_stat_activity`, `pg_stat_database`, `pg_locks`,
