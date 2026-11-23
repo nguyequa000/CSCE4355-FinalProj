@@ -45,7 +45,7 @@ One alert opened and resolved:
 | Threshold crossed (`eligible_at`, +30 s) | `docs/results/live/alert_sql.txt` |
 | Alert 1 fired, `observed_seconds` 51.8 | `docs/results/live/alert_sql.txt` |
 | Notifier printed the alert | `docs/results/live/notifier_console.log` |
-| Lock released | 21:45:03.434 | `docs/results/live/lock_demo.log` |
+| Lock released | `docs/results/live/lock_demo.log` |
 | Alert resolved, open alerts 0 | `docs/results/live/alert_sql.txt` |
 
 Detection took 51.8 s against the proposal's 120 s (two-interval) target and resolution took 21.8 s
