@@ -1,0 +1,78 @@
+# docker-compose.yml  (M1 - Dustin Dowell)
+#
+# One-command environment from the proposal:
+#
+#   cp .env.example .env        # then replace every change-me
+#   docker compose up -d --build
+#
+# The first start of an empty `pgdata` volume runs every numbered script in
+# ./sql (roles, shop schema + small seed, monitor schema, collector, purge,
+# alerts, pg_cron jobs). pg_cron then calls monitor.capture_snapshot() every
+# minute; do NOT also run scripts/collect.py against the same database.
+#
+# Host tools (dashboard, notifier, tests, workload/seed_data.py) connect exactly
+# as they do to the local cluster, because the port below is taken from .env:
+# PGHOST=127.0.0.1, PGPORT=55432.
+#
+# Reset everything:  docker compose down -v
+name: pg-monitoring
+
+services:
+  postgres:
+    build: ./docker/postgres
+    image: csce4355/postgres-monitor:16
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - cron.database_name=${PGDATABASE:-shopdb}
+    environment:
+      # Only the variables the container needs. .env is NOT passed as env_file:
+      # its PGHOST/PGPORT would redirect the server and the init scripts.
+      POSTGRES_USER: ${PG_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${PG_SUPERUSER_PASSWORD:?set PG_SUPERUSER_PASSWORD in .env}
+      APP_DB: ${PGDATABASE:-shopdb}
+      SHOP_APP_PASSWORD: ${SHOP_APP_PASSWORD:?set SHOP_APP_PASSWORD in .env}
+      MONITOR_COLLECTOR_PASSWORD: ${MONITOR_COLLECTOR_PASSWORD:?set MONITOR_COLLECTOR_PASSWORD in .env}
+      MONITOR_READER_PASSWORD: ${MONITOR_READER_PASSWORD:?set MONITOR_READER_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${PGPORT:-55432}:5432"   # loopback only, same port as the local cluster
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql:/project/sql:ro
+    shm_size: 256mb
+    healthcheck:
+      # TCP on purpose: the entrypoint's temporary init server listens on the
+      # socket only, so this turns healthy after the init scripts have finished.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${APP_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+  # Optional Grafana from the proposal (M7). The team's delivered dashboard is
+  # Streamlit (dashboard/app.py), so Grafana only starts when asked for:
+  #   docker compose --profile grafana up -d
+  # Provisioning files go in ./grafana/provisioning and ./grafana/dashboards.
+  grafana:
+    image: grafana/grafana-oss:11.3.0
+    profiles: ["grafana"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # read by a provisioned data source as $MONITOR_READER_PASSWORD (read-only role)
+      MONITOR_READER_PASSWORD: ${MONITOR_READER_PASSWORD:-}
+      APP_DB: ${PGDATABASE:-shopdb}
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+volumes:
+  pgdata:

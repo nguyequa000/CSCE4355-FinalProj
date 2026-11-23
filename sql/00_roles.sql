@@ -9,8 +9,10 @@ SELECT format('CREATE ROLE monitor_collector LOGIN PASSWORD %L', :'collector_pw'
 SELECT format('CREATE ROLE monitor_reader LOGIN PASSWORD %L', :'reader_pw')
  WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'monitor_reader') \gexec
 
--- collector needs to see every session's state/PIDs (not just its own)
-GRANT pg_read_all_stats TO monitor_collector;
+-- collector needs to see every session's state/PIDs (not just its own).
+-- pg_monitor (proposal 6.2, M2) = pg_read_all_stats + pg_read_all_settings +
+-- pg_stat_scan_tables: everything the monitor needs, no write access anywhere.
+GRANT pg_monitor TO monitor_collector;
 
 SELECT format('CREATE DATABASE %I', :'dbname')
  WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'dbname') \gexec
