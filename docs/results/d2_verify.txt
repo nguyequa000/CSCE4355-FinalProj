@@ -1,0 +1,207 @@
+LANE D2 — dashboard history views + rule-aware alerts — verification
+=====================================================================
+captured : 2026-11-22 22:57 CST (America/Chicago)
+branch   : hermes-subagent/subagent-sa-3-7c15a30c (base d0ca12c)
+worktree : <HOME>/Documents/test/School/CSCE4355/Assignment_Instruction/Final_Project/.worktrees/subagent-sa-3-7c15a30c
+python   : ../../.venv/Scripts/python.exe — Python 3.12.10, streamlit 1.67.0, pandas 3.1.1
+cluster  : 127.0.0.1:55432 — PostgreSQL 17.11
+databases: shopdb_d2  — full fixtures (contract base tables + stand-in views + extra-rule alerts)
+           shopdb_d2b — fresh scripts/setup_db.sh database WITHOUT the new views
+scope    : dashboard/app.py, dashboard/static_report.py, dashboard/dev_fixtures_v2.sql, dashboard/NOTES.md
+access   : monitor_reader, default_transaction_read_only=on, statement_timeout=8000;
+           the dashboard guard rejects every non-SELECT statement.
+
+Every row and image below is DEV / SYNTHETIC, not live-demo evidence.
+
+
+1. Fixture databases
+-------------------
+$ bash scripts/setup_db.sh shopdb_d2
+  psql:sql/00_roles.sql:13: NOTICE: role "monitor_collector" has already been granted membership in role "pg_read_all_stats" by role "postgres"
+  applied sql/01_shop.sql to shopdb_d2
+  applied sql/10_monitor.sql to shopdb_d2
+  applied sql/20_alerts.sql to shopdb_d2
+  applied sql/21_extra_rules.sql to shopdb_d2
+  server=17.11|pg_stat_statements=1.11|customers=1000|orders=10000
+
+$ PGPASSWORD=*** psql -h 127.0.0.1 -p 55432 -U postgres -d shopdb_d2 -v ON_ERROR_STOP=1 \
+    -f dashboard/dev_fixtures.sql -f dashboard/dev_fixtures_v2.sql
+  fixtures: snapshots=6 sessions=32 lock_edges=7 alerts=2
+  fixtures_v2: table_stats=12 statements=24 new_alerts=6
+
+$ bash scripts/setup_db.sh shopdb_d2b        # fresh DB, no dev_fixtures_v2.sql
+  applied sql/01_shop.sql to shopdb_d2b
+  applied sql/10_monitor.sql to shopdb_d2b
+  applied sql/20_alerts.sql to shopdb_d2b
+  applied sql/21_extra_rules.sql to shopdb_d2b
+  server=17.11|pg_stat_statements=1.11|customers=1000|orders=10000
+
+
+2. Database contract checks (as postgres)
+-----------------------------------------
+shopdb_d2:
+server_version 
+----------------
+ 17.11
+(1 row)
+
+     v_table_stats     |     v_statement_stats     |     v_hourly_rollup     |     table_stat_sample     |     statement_sample     
+-----------------------+---------------------------+-------------------------+---------------------------+--------------------------
+ monitor.v_table_stats | monitor.v_statement_stats | monitor.v_hourly_rollup | monitor.table_stat_sample | monitor.statement_sample
+(1 row)
+
+ table_stat_rows | statement_rows | v_table_stats_rows | v_statement_stats_rows | v_hourly_rows 
+-----------------+----------------+--------------------+------------------------+---------------
+              12 |             24 |                 12 |                     24 |             1
+(1 row)
+
+ reader_table_stats | reader_statement_stats | reader_hourly 
+--------------------+------------------------+---------------
+ t                  | t                      | t
+(1 row)
+
+shopdb_d2b:
+v_table_stats | v_statement_stats | v_hourly_rollup | snapshots 
+---------------+-------------------+-----------------+-----------
+               |                   |                 |         0
+(1 row)
+
+dev_fixtures_v2.sql created the two contract base tables IF NOT EXISTS, created the three
+stand-in views only because to_regclass returned NULL, granted SELECT to monitor_reader,
+and loaded synthetic rows. On shopdb_d2b the views/tables are absent and stay absent.
+
+
+3. Streamlit AppTest — shopdb_d2 (new views present)
+----------------------------------------------------
+$ DASH_DB=shopdb_d2 ../../.venv/Scripts/python.exe <SCRATCH>/d2_apptest.py shopdb_d2 dashboard/app.py
+{
+  "database": "shopdb_d2",
+  "exceptions": 0,
+  "title": 1,
+  "subheaders": 7,
+  "dataframes": 8,
+  "metrics": 9,
+  "infos": 0,
+  "warnings": 1,
+  "errors": 1,
+  "successes": 1,
+  "captions": 13,
+  "multiselects": 1,
+  "vega_lite_charts": 5
+}
+SUBHEADERS: ["1 · Alerts", "2 · Current blockers", "3 · Lock history (last 6 snapshots)", "4 · Session state and database counters", "5 · Table health", "6 · Top statements by total execution time", "7 · Hourly rollup"]
+INFOS: []
+WARNINGS: ["2 blocked/blocker edge(s) at snapshot #6."]
+ERRORS: ["5 open alert(s) — blocking threshold currently exceeded."]
+SUCCESSES: ["Collector current: latest snapshot #6 at 2026-11-22 22:56:21 CST (16s ago). Server clock 2026-11-22 22:56:37 CST."]
+EXCEPTIONS: []
+DF_COLUMNS: [["alert_id", "rule_name", "target", "severity", "blocked_pid", "blocker_pid", "first_seen_at", "eligible_at", "fired_at", "observed_seconds", "notified_at"], ["alert_id", "rule_name", "target", "severity", "blocked_pid", "blocker_pid", "fired_at", "resolved_at", "observed_seconds", "notified_at", "resolve_notified_at"], ["snapshot_id", "captured_at", "blocked_pid", "blocker_pid", "blocked_user", "blocker_user", "blocked_app", "blocker_app", "blocker_state", "wait_started", "waited_seconds"], ["snapshot_id", "captured_at", "blocked_pid", "blocker_pid", "blocked_user", "blocker_user", "blocked_app", "blocker_app", "blocker_state", "wait_started", "waited_seconds"], ["snapshot_id", "captured_at", "datname", "numbackends", "deadlocks", "xact_commit_delta", "xact_rollback_delta", "blks_read_delta", "blks_hit_delta"], ["table", "n_live_tup", "n_dead_tup", "dead_pct", "seq_scan", "idx_scan"], ["snapshot_id", "captured_at", "queryid", "calls_delta", "total_exec_time_delta", "mean_exec_time"], ["hour", "snapshots", "max_lock_edges", "max_sessions", "xact_commit_delta_sum", "blks_hit_ratio", "alerts_fired"]]
+DF_TARGETS: [["table customers", "database", "pid 4101 blocked by 4100", "table orders", "pid 4100"], ["pid 4051 blocked by 4050", "database", "pid 4400"]]
+MULTISELECT_OPTIONS: [["blocked_session", "cache_hit_ratio", "connection_saturation", "dead_tuple_risk", "idle_in_transaction", "long_active_query"]]
+VERDICT: PASS
+
+The AppTest ran immediately after a fixture reload, so the retained freshness banner showed
+"Collector current: latest snapshot #6 ... (16s ago)". No AppTest exception.
+Assertions: 7/7 panels, 8 dataframes (both alert tables include `target`),
+1 filter multiselect with all six rule names, 5 Vega-Lite charts. Target values observed:
+table customers · database · pid 4101 blocked by 4100 · table orders · pid 4100
+(open), and pid 4051 blocked by 4050 · database · pid 4400 (resolved). VERDICT PASS.
+
+
+4. Streamlit AppTest — shopdb_d2b (fresh DB, no new views)
+-----------------------------------------------------------
+$ DASH_DB=shopdb_d2b ../../.venv/Scripts/python.exe <SCRATCH>/d2_apptest.py shopdb_d2b dashboard/app.py
+{
+  "database": "shopdb_d2b",
+  "exceptions": 0,
+  "title": 1,
+  "subheaders": 7,
+  "dataframes": 0,
+  "metrics": 6,
+  "infos": 7,
+  "warnings": 1,
+  "errors": 0,
+  "successes": 1,
+  "captions": 5,
+  "multiselects": 0,
+  "vega_lite_charts": 0
+}
+SUBHEADERS: ["1 · Alerts", "2 · Current blockers", "3 · Lock history (last 0 snapshots)", "4 · Session state and database counters", "5 · Table health", "6 · Top statements by total execution time", "7 · Hourly rollup"]
+INFOS: ["No blocking at latest snapshot.", "No lock waits recorded in the selected window.", "No session samples in the selected window.", "No database counter samples in the selected window.", "Table health: `monitor.v_table_stats` **not available in this database** — the optional history views have not been installed here.", "Top statements: `monitor.v_statement_stats` **not available in this database** — the optional history views have not been installed here.", "Hourly rollup: `monitor.v_hourly_rollup` **not available in this database** — the optional history views have not been installed here."]
+WARNINGS: ["No snapshots yet — start the collector (`scripts/collect.py`)."]
+ERRORS: []
+SUCCESSES: ["No open alerts."]
+EXCEPTIONS: []
+DF_COLUMNS: []
+DF_TARGETS: []
+MULTISELECT_OPTIONS: []
+VERDICT: PASS
+
+All three optional panels rendered the literal "not available in this database" and the
+original panels still rendered; the AppTest tree reported 0 exceptions. The fresh DB
+has no snapshots yet, hence 0 dataframes. VERDICT PASS.
+
+
+5. Static HTML fallback
+------------------------
+$ ../../.venv/Scripts/python.exe dashboard/static_report.py --db shopdb_d2 \
+    --out docs/results/d2_static_SYNTHETIC.html --window 12
+wrote docs\results\d2_static_SYNTHETIC.html (18684 bytes) from db=shopdb_d2 role=monitor_reader snapshots=6
+wrote docs\results\d2_static_no_views_SYNTHETIC.html (4455 bytes) from db=shopdb_d2b role=monitor_reader snapshots=0
+
+The no-view page contains the warning text exactly 3 times (one per optional panel):
+  grep -c "not available in this database" docs/results/d2_static_no_views_SYNTHETIC.html -> 3
+
+
+6. Streamlit boot on :8521
+--------------------------
+$ DASH_DB=shopdb_d2 ../../.venv/Scripts/python.exe -m streamlit run dashboard/app.py \
+    --server.port 8521 --server.headless true --server.address 127.0.0.1
+$ curl -s http://127.0.0.1:8521/_stcore/health
+  ok   (HTTP 200)
+
+server log (docs/results/d2_streamlit.log; only the loopback URL was printed, and the
+Network/External URL filter is applied before saving):
+Collecting usage statistics. To deactivate, set browser.gatherUsageStats to false.
+
+2026-11-22 22:54:15.014 Uvicorn server started on 127.0.0.1:8521
+
+  You can now view your Streamlit app in your browser.
+
+  URL: http://127.0.0.1:8521
+
+exception scan: 0 occurrences of "Traceback", 0 occurrences of "Error" in the server log.
+shutdown: listener PID stopped with Stop-Process -Id; netstat no longer shows :8521 LISTENING.
+
+
+7. Screenshot (headless Edge)
+------------------------------
+$ "/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" --headless=new \
+    --hide-scrollbars --window-size=1500,3600 --virtual-time-budget=20000 \
+    --user-data-dir="<SCRATCH>/edge-d2-exact" \
+    --screenshot="docs/results/d2_dev_dashboard_SYNTHETIC.png" http://127.0.0.1:8521/
+docs/results/d2_dev_dashboard_SYNTHETIC.png (1500, 3600) 380589 bytes
+docs/results/d2_dev_dashboard_full_SYNTHETIC.png (1500, 5000) 456197 bytes
+
+A cold first attempt with the same 20 s budget captured an unpainted Streamlit canvas
+(6 colours); after the server was warm the command above produced the valid image
+(8,325 colours, non-blank). The 1500x3600 viewport cuts panels 6-7, so an extra full-page
+render was taken with the same flags at --window-size=1500,5000:
+  docs/results/d2_dev_dashboard_full_SYNTHETIC.png — 1500x5000, 456,197 bytes.
+The rendered content height at 1500 px width is 4561 px (measured in the live DOM).
+
+
+8. Artifacts
+-------------
+dashboard/app.py                       — optional-view probes + panels 5-7 + rule-aware alert target/filter
+dashboard/static_report.py            — same panels in the static fallback + inline SVG dead-tuple chart
+dashboard/dev_fixtures_v2.sql         — contract base tables, stand-in views only when missing, grants, synthetic rows
+dashboard/NOTES.md                    — updated panels, tolerance behaviour, fixture instructions
+docs/results/d2_verify.txt            — this file
+docs/results/d2_streamlit.log         — redacted server log
+docs/results/d2_dev_dashboard_SYNTHETIC.png       — 1500x3600 headless-Edge screenshot
+docs/results/d2_dev_dashboard_full_SYNTHETIC.png  — 1500x5000 full-page screenshot
+docs/results/d2_static_SYNTHETIC.html             — static fallback, shopdb_d2
+docs/results/d2_static_no_views_SYNTHETIC.html    — static fallback, shopdb_d2b (no views)
+
+No home path or non-loopback address is recorded here.

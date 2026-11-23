@@ -1,0 +1,13 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.2.0, pluggy-1.7.0 -- HOME_REDACTED\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: HOME_REDACTED\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.worktrees\subagent-sa-0-22cd3574
+plugins: anyio-4.16.0
+collecting ... collected 4 items
+
+tests/test_capture.py::test_unattended_snapshots_have_distinct_increasing_timestamps PASSED [ 25%]
+tests/test_capture.py::test_lock_wait_edge_captured_then_gone_but_history_kept PASSED [ 50%]
+tests/test_capture.py::test_db_stat_deltas_null_first_then_non_negative PASSED [ 75%]
+tests/test_capture.py::test_no_sql_text_is_persisted PASSED              [100%]
+
+============================== 4 passed in 0.55s ==============================
