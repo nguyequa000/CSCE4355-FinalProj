@@ -16,8 +16,9 @@ the history to a read-only dashboard role.
 The delivered demonstration is deliberately narrow: **one DBA workflow, end to end** — a simulated
 shop develops lock contention, the collector preserves who blocked whom, the rule fires, the console
 notifier reports it, the dashboard shows the same event, the alert resolves after the lock clears.
-The proposal's six alert rules, six shop tables, Grafana dashboard, Docker Compose stack and
-`pg_cron` scheduling are **not** all delivered; §10 states exactly what is and is not implemented.
+The proposal's six alert rules and six shop tables are delivered, and all six rules have a captured
+run showing the alert open and resolve; the Grafana dashboard is not delivered. The Docker Compose
+stack and `pg_cron` scheduling exist as optional modules that the verified run does not use (§10).
 
 ### 1.1 Verified result (live run, 2026-11-22)
 
@@ -43,7 +44,14 @@ Two further rules were verified in a separate live run on `shopdb_t5`: `idle_in_
 20.602 s after the session ended; `long_active_query` fired 60.562 s after the query started
 (0.561 s after eligibility) and resolved 20.555 s after the session ended. Both runs used a 30 s
 collector cadence, not the 60 s default, so the timing is sample-bounded as disclosed in
-`docs/results/t5_extra_rules_live.txt`. Three of the six proposed rules are now verified live.
+`docs/results/t5_extra_rules_live.txt`.
+
+The other three rules — `connection_saturation`, `cache_hit_ratio` and `dead_tuple_risk` — were
+exercised in lane R2 on disposable databases (`docs/results/r2_connection_saturation_live.txt`,
+`docs/results/r2_cache_hit_ratio_live.txt`, `docs/results/r2_live.txt`). The two value thresholds
+were temporarily adjusted and restored, because the seeded database cannot breach the real
+defaults: `connection_saturation` 0.80 → 0.05 and `cache_hit_ratio` 0.90 → 1.01. All six proposed
+rules are now verified live (§9).
 
 A fresh-clone reproduction was run by the team's automated tooling — **self-tested by team tooling,
 not independently reproduced by a teammate**. It reproduced T1–T7 end to end (cluster, schema,
@@ -341,7 +349,10 @@ captured files.
 | `docs/results/t5_extra_rules_live.txt` | `idle_in_transaction` and `long_active_query`: one alert each, fired 60.605 s / 60.562 s after injection and resolved 20.602 s / 20.555 s after the sessions ended, at a 30 s cadence | Captured 21:54–21:59 CST |
 | `docs/results/t5_extra_rules_pytest.txt` | `tests/test_extra_rules.py` `11 passed in 18.41s`; `tests/test_alert.py` `9 passed in 3.47s` after the change | Captured 21:59:43 CST |
 | `docs/results/final_pytest.txt` | Full suite on freshly dropped and recreated test databases: `29 passed in 22.18s` | Captured 22:06:53 CST |
-| `docs/results/pgbench_overhead.txt` | Three collector-off / three collector-on `pgbench` runs | Not measured |
+| `docs/results/perf_overhead.txt` | Three collector-off / three collector-on `pgbench` runs: mean 9648.54 vs 9630.45 TPS, −0.19 % on-vs-off, 10 s collector interval | Captured 23:03:31 CST |
+| `docs/results/r2_live.txt` | Rule setup for all six rules; `dead_tuple_risk` opened at 3,000 dead tuples (ratio 0.231) and resolved after `VACUUM` | Captured 22:46 CST |
+| `docs/results/r2_connection_saturation_live.txt` | `connection_saturation` opened at 7 backends of 100 and resolved after they closed; threshold lowered 0.80 → 0.05 and restored | Captured 23:07 CST |
+| `docs/results/r2_cache_hit_ratio_live.txt` | `cache_hit_ratio` opened and resolved; threshold forced 0.90 → 1.01 and restored | Captured 23:08 CST |
 
 ## 8. Repository structure
 
@@ -392,18 +403,19 @@ Final_Project/
 
 ## 9. Status of alert rules
 
-`blocked_session`, `idle_in_transaction` and `long_active_query` are verified live in this build —
-3 of the 6 proposed rules. A rule is called **verified** only when a captured run shows the alert
-opening and resolving.
+All six proposed rules are verified live in this build. A rule is called **verified** only when a
+captured run shows the alert opening and resolving: `blocked_session`, `idle_in_transaction` and
+`long_active_query` through the collector, and `connection_saturation`, `cache_hit_ratio` and
+`dead_tuple_risk` by calling `monitor.evaluate_more_rules()` directly in the lane R2 harness.
 
 | Rule (proposal §8.2) | Threshold | Severity | Status |
 |---|---|---|---|
 | Blocked sessions | wait ≥ 30 s | critical | **Verified (live)** — alert 1 opened 21:43:25.214 and resolved 21:45:25.208 (`docs/results/live/alert_sql.txt`) |
 | Idle in transaction | > 60 s | warning | **Verified (live, 30 s cadence)** — alert 1 opened 21:55:05.198, 60.605 s after injection (0.604 s after eligibility), resolved 21:56:05.192, 20.602 s after the session ended (`docs/results/t5_extra_rules_live.txt`) |
 | Long-running query | active > 60 s | warning | **Verified (live, 30 s cadence)** — alert 2 opened 21:57:44.958, 60.562 s after the query started (0.561 s after eligibility), resolved 21:58:44.953, 20.555 s after the session ended (same file) |
-| Connection saturation | > 80 % of `max_connections` | critical | Not implemented |
-| Low cache hit ratio | < 95 % over 5 min | warning | Not implemented |
-| Table bloat risk | dead tuples > 20 % of live tuples | info | Not implemented |
+| Connection saturation | > 80 % of `max_connections` | critical | **Verified (live)** — alert 1 opened with 7 backends of `max_connections = 100` and resolved once they closed (23:07:44.498 → 23:07:46.496); threshold lowered 0.80 → 0.05 and restored (`docs/results/r2_connection_saturation_live.txt`) |
+| Low cache hit ratio | < 95 % over 5 min | warning | **Verified (live)** — alert 2 opened and resolved (23:08:20.182 → 23:08:23.366); threshold forced 0.90 → 1.01 because the seeded database's ratio is ~1.0, then restored (`docs/results/r2_cache_hit_ratio_live.txt`) |
+| Table bloat risk | dead tuples > 20 % of live tuples | info | **Verified (live)** — alert 2 opened at 3,000 dead tuples (ratio 0.231) and resolved after `VACUUM` (22:46:42.514 → 22:46:44.648); the synthetic pytest row in that file is identified as such (`docs/results/r2_live.txt`) |
 
 The two extra rules are implemented in `sql/21_extra_rules.sql` as
 `monitor.evaluate_extra_rules(snapshot_id)`, called from `monitor.evaluate_alerts()` when the
@@ -415,6 +427,13 @@ only because eligibility happened to fall just before a scheduled sample. For th
 condition has a blocker. Configuration rows alone do not count as detection: `monitor.alert_rule`
 holding a row is not evidence that the rule fired.
 
+The three remaining rules are implemented in `sql/22_more_rules.sql` as
+`monitor.evaluate_more_rules(snapshot_id)`; `monitor.collect_extra(snapshot_id)` in
+`sql/12_history.sql` supplies the table statistics they read, and `tests/test_more_rules.py` covers
+them with 14 tests. They are evaluated by calling `monitor.evaluate_more_rules()` directly:
+`monitor.evaluate_alerts()` chains `evaluate_extra_rules()` but not `evaluate_more_rules()`, so the
+collector does not fire these three on its own (§10).
+
 ## 10. Implementation status and limitations
 
 Disclosed deviations from the approved proposal (all of them also appear in report §8):
@@ -425,9 +444,9 @@ Disclosed deviations from the approved proposal (all of them also appear in repo
 | Scheduler | `pg_cron` in-database job | `pg_cron` jobs in Docker (`sql/90_cron_jobs.sql`); Python loop on the Windows cluster; both call `monitor.capture_snapshot()` |
 | Dashboard | Provisioned Grafana | Streamlit app on port 8501 (Grafana service available under a Compose profile, unprovisioned) |
 | Shop schema | 6 tables, ~100k customers / ~1M orders | 6 tables, **1,000 / 10,000** deterministic rows by default; `workload/seed_data.py` for proposal scale (not yet run) |
-| History | Session, statement, table, index, lock and database history; hourly rollup; retention | All six histories and a 7-day purge function (M2/M3); no hourly rollup |
-| Alert rules | 6 | 3 of 6 verified live (`blocked_session`, `idle_in_transaction`, `long_active_query`); saturation, cache ratio and bloat not implemented |
-| Overhead | `< 5 %` pgbench impact | **Not measured** |
+| History | Session, statement, table, index, lock and database history; hourly rollup; retention | All six histories, an hourly rollup view (`monitor.v_hourly_rollup`, H1) and a 7-day purge function (M2/M3) |
+| Alert rules | 6 | All 6 implemented and verified live (§9); the three lane-R2 rules are evaluated by an explicit `monitor.evaluate_more_rules()` call, not yet chained from `monitor.evaluate_alerts()` |
+| Overhead | `< 5 %` pgbench impact | Measured: −0.19 % mean TPS (collector on vs off, n = 3 each, 10 s interval) in `docs/results/perf_overhead.txt` |
 | Recording | Required video | **Outstanding** |
 
 Further limitations:
