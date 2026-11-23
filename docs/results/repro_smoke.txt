@@ -1,0 +1,387 @@
+================================================================================
+INDEPENDENT REPRODUCTION SMOKE TEST — PostgreSQL Database Monitoring Dashboard
+Independent re-run by an automated agent from the README on a fresh clone —
+self-tested by the team's tooling, not by a human teammate.
+================================================================================
+
+Source repo : C:/Users/johnq/Documents/test/School/CSCE4355/Assignment_Instruction/Final_Project
+              git master, HEAD 8a0b226 (cloned, not copied)
+Clone       : C:/Users/johnq/AppData/Local/hermes/cache/scratch/csce4355-repro
+              (fresh `git clone`; no .env, no .pgdata, no .venv present)
+Host        : Windows 11, Git Bash (MSYS), PostgreSQL 17.11 binaries at
+              C:/Program Files/PostgreSQL/17/bin
+Start       : 2026-11-22 21:48:23 CST (UTC-06:00)
+End         : 2026-11-22 22:01 CST (UTC-06:00)
+Isolation   : disposable cluster on 127.0.0.1:55433 (README default 55432),
+              dashboard on 127.0.0.1:8511 (README default 8501).
+              The live demo cluster on :55432 and the Windows service on :5432
+              were never touched and stayed listening throughout.
+Deviations  : (1) port 55433 instead of 55432 (required for isolation);
+              (2) collector `--interval 15 --count 6` and `lock_demo --hold 60`
+                  instead of the README's 60 s / 150 s, to fit one short run.
+              Everything else follows README.md literally.
+Credentials : generated locally (secrets.token_urlsafe(18)) into .env; never
+              printed and redacted as <REDACTED> below.
+Verdict     : PASS end to end (cluster, schema, 18/18 tests, alert fire +
+              resolve, notifier, dashboard health, cleanup) — but only after the
+              three README gaps in §G are worked around. §G lists each one with
+              the exact fix that worked.
+
+--------------------------------------------------------------------------------
+0. ENVIRONMENT (README §3)
+--------------------------------------------------------------------------------
+$ cd C:/Users/johnq/AppData/Local/hermes/cache/scratch
+$ git clone C:/Users/johnq/Documents/test/School/CSCE4355/Assignment_Instruction/Final_Project csce4355-repro
+Cloning into 'csce4355-repro'...
+done.
+$ git log --oneline -1
+8a0b226 Live end-to-end blocked-session evidence: collector/notifier/lock demo logs, SQL, dashboard screenshots
+$ git status --porcelain | wc -l
+0
+
+$ uv venv .venv --python 3.12
+Using CPython 3.12.10 interpreter at: C:\Users\johnq\AppData\Local\Programs\Python\Python312\python3.exe
+Creating virtual environment at: .venv
+
+$ uv pip install --python .venv/Scripts/python.exe "psycopg[binary]" streamlit pytest
+ + streamlit==1.67.0
+ + psycopg==3.3.9 (binary)
+ + pytest==9.2.0
+$ uv pip install --python .venv/Scripts/python.exe python-docx matplotlib
+ + python-docx==1.2.0
+ + matplotlib==3.11.2
+
+$ .venv/Scripts/python.exe -c "import psycopg, streamlit, pytest, sys; ..."
+python 3.12.10
+psycopg 3.3.9
+streamlit 1.67.0
+pytest 9.2.0
+=> matches the versions README §3 says the build machine used. PASS.
+
+--------------------------------------------------------------------------------
+1. .env (README §4.1)
+--------------------------------------------------------------------------------
+$ cp .env.example .env
+$ python - <<'PY'   # replace every change-me with a random string, set port 55433
+...
+wrote .env with 0 remaining change-me values
+$ grep -c 'change-me' .env
+0
+$ grep -o '^PGPORT=.*' .env
+PGPORT=55433
+
+README §4.1 says the PGPORT row of the table means ".env controls the port".
+That is only half true; see gap G1. Verification of the gap:
+
+$ bash -c 'PORT="${PGPORT:-55432}"; set -a; . ./.env; set +a; \
+           echo "PORT_before_sourcing_env=$PORT  PGPORT_after_sourcing=$PGPORT"'
+PORT_before_sourcing_env=55432  PGPORT_after_sourcing=55433
+
+i.e. start_cluster.sh fixes PORT before it sources .env, so a .env-only PGPORT
+change is ignored at cluster-init time.
+
+--------------------------------------------------------------------------------
+2. CLUSTER START (README §4.2)  — FAIL, then PASS
+--------------------------------------------------------------------------------
+First attempt, README command verbatim (PGPORT exported, .env already set):
+
+$ export PGPORT=55433
+$ scripts/start_cluster.sh
+initdb: error: could not open file "/tmp/tmp.ffo4ThindV" for reading: No such file or directory
+[FAIL — no .pgdata created, no server started]
+
+Cause: scripts/start_cluster.sh:19 does `pwfile="$(mktemp)"`. In this Git Bash
+TMPDIR=/tmp and MSYS path translation is disabled, so mktemp returns an MSYS
+`/tmp/...` path that the native initdb.exe cannot open. See gap G2.
+
+Workaround that worked (no file in the repo changed):
+
+$ export TMPDIR='C:/Users/johnq/AppData/Local/hermes/cache/scratch/tmppw'
+$ scripts/start_cluster.sh
+waiting for server to start.... done
+server started
+127.0.0.1:55433 - accepting connections
+[PASS]
+
+$ grep -E "^(port|listen_addresses|shared_preload_libraries)" .pgdata/postgresql.conf
+port = 55433
+listen_addresses = '127.0.0.1'
+shared_preload_libraries = 'pg_stat_statements'
+
+Note: piping `scripts/start_cluster.sh` into `tee` never returns in this shell
+(the started server inherits the pipe) and the run was killed at the 300 s
+timeout; `> file 2>&1` returns normally. See gap G5.
+
+--------------------------------------------------------------------------------
+3. DATABASE, ROLES, SCHEMA (README §4.3)
+--------------------------------------------------------------------------------
+$ scripts/setup_db.sh
+psql:sql/01_shop.sql:9: NOTICE:  table "orders" does not exist, skipping
+psql:sql/01_shop.sql:10: NOTICE:  table "customers" does not exist, skipping
+applied sql/01_shop.sql to shopdb
+applied sql/10_monitor.sql to shopdb
+applied sql/20_alerts.sql to shopdb
+server=17.11|pg_stat_statements=1.11|customers=1000|orders=10000
+[PASS — exactly the four values README §4.3 predicts]
+
+--------------------------------------------------------------------------------
+4. TESTS (README §6)
+--------------------------------------------------------------------------------
+README §6 gives exactly one command and says nothing about test databases.
+
+$ .venv/Scripts/python.exe -m pytest tests -v
+...
+collected 18 items
+tests/test_alert.py::test_below_threshold_does_not_alert ERROR
+... (16 errors, 2 failed)
+======================== 2 failed, 16 errors in 0.83s ========================
+[FAIL — README command as written cannot pass on a fresh cluster]
+
+Actual first error:
+E   psycopg.OperationalError: connection failed: connection to server at
+    "127.0.0.1", port 55433 failed: FATAL:  password authentication failed
+    for user "postgres"
+Distinct FATAL lines in that run: 13x user "postgres", 3x user "monitor_reader",
+2x user "shop_app".
+
+tests/conftest.py:4-7 requires `shopdb_t2`; tests/test_alert.py:4-5 requires
+`shopdb_t3`. Neither is mentioned in README §6. See gap G3.
+
+$ scripts/setup_db.sh shopdb_t2
+applied sql/20_alerts.sql to shopdb_t2
+server=17.11|pg_stat_statements=1.11|customers=1000|orders=10000
+$ scripts/setup_db.sh shopdb_t3
+applied sql/20_alerts.sql to shopdb_t3
+server=17.11|pg_stat_statements=1.11|customers=1000|orders=10000
+
+Second attempt still failed identically (2 failed, 16 errors in 0.94s) — see
+gap G4. Third attempt, after the shell's .env values were exported:
+
+$ .venv/Scripts/python.exe -m pytest tests -v
+...
+tests/test_privileges.py::test_reader_cannot_select_snapshot_base_table PASSED [ 83%]
+tests/test_privileges.py::test_reader_cannot_select_shop_customers PASSED [ 88%]
+tests/test_privileges.py::test_shop_app_cannot_select_monitor_alerts_view PASSED [ 94%]
+tests/test_privileges.py::test_shop_app_cannot_select_monitor_snapshot PASSED [100%]
+============================= 18 passed in 3.63s ==============================
+
+Confirmed once more from a clean subshell with no inherited PG* variables:
+
+$ env -u PGPASSWORD -u PG_SUPERUSER_PASSWORD -u SHOP_APP_PASSWORD \
+      -u MONITOR_COLLECTOR_PASSWORD -u MONITOR_READER_PASSWORD -u PGHOST \
+      -u PGDATABASE -u PG_SUPERUSER -u PGPORT \
+      .venv/Scripts/python.exe -m pytest tests -q
+..................                                                       [100%]
+18 passed in 3.69s
+=> PASS: 18 passed, 0 failed, 0 errors (18 = 9 alert + 3 capture + 6 privilege).
+
+--------------------------------------------------------------------------------
+5. LIVE SCENARIO (README §5.1, §5.2, §5.4)
+--------------------------------------------------------------------------------
+Collector, notifier and lock demo started within ~8 s of each other:
+
+$ .venv/Scripts/python.exe notifier/notify.py --interval 5
+$ .venv/Scripts/python.exe scripts/collect.py --interval 15 --count 6
+$ .venv/Scripts/python.exe workload/lock_demo.py --hold 60
+
+collector output (unedited):
+collector: db=shopdb interval=15s count=6
+snapshot_id=1 captured_at=2026-11-22T21:57:57.422183-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=2 captured_at=2026-11-22T21:58:12.381981-06:00 sessions=3 lock_edges=1 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=3 captured_at=2026-11-22T21:58:27.386941-06:00 sessions=3 lock_edges=1 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=4 captured_at=2026-11-22T21:58:42.391367-06:00 sessions=3 lock_edges=1 alerts_opened=1 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=5 captured_at=2026-11-22T21:58:57.383171-06:00 sessions=3 lock_edges=1 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=6 captured_at=2026-11-22T21:59:12.387827-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=1 evaluate_alerts=present
+
+lock demo output:
+blocker_pid=19700 holds row customer_id=42
+waiter_pid=23896 injection=2026-11-23T03:58:10.199+00:00 (blocked by blocker_pid=19700)
+holding for 60s ...
+release=2026-11-23T03:59:10.197+00:00
+waiter_finished=2026-11-23T03:59:10.199+00:00 ok=true
+event_log=C:\Users\johnq\AppData\Local\hermes\cache\scratch\csce4355-repro\docs\results\lock_demo_events.jsonl
+
+notifier output:
+[ALERT FIRED] id=1 rule=blocked_session severity=critical blocked_pid=23896 blocker_pid=19700 fired_at=2026-11-22T21:58:42.391367-06:00 observed=32.2s
+[ALERT RESOLVED] id=1 resolved_at=2026-11-22T21:59:12.387827-06:00
+
+=> PASS: lock edge captured while the lock was held, alert opened at the first
+snapshot where observed >= 30 s (32.2 s), notifier printed it once, and the
+first snapshot after release resolved it. Exactly the sequence README §5.4
+describes.
+
+--------------------------------------------------------------------------------
+6. ALERT ROWS, READ AS monitor_reader (README §5.3 privilege path)
+--------------------------------------------------------------------------------
+$ PGPASSWORD=<REDACTED> psql -h 127.0.0.1 -p 55433 -U monitor_reader -d shopdb \
+    -c "select alert_id, rule_name, severity, blocked_pid, blocker_pid,
+               observed_seconds, status, fired_at, resolved_at from monitor.v_alerts"
+ alert_id |    rule_name    | severity | blocked_pid | blocker_pid | observed_seconds | status |           fired_at            |        resolved_at
+----------+-----------------+----------+-------------+-------------+------------------+--------+-------------------------------+-------------------------------
+        1 | blocked_session | critical |       23896 |       19700 |             32.2 | open   | 2026-11-22 21:58:42.391367-06 |
+(1 row)
+
+... after the release and the next snapshot:
+
+ alert_id |    rule_name    | severity | blocked_pid | blocker_pid | observed_seconds |  status  |           fired_at            |          resolved_at          | notified | resolve_notified
+----------+-----------------+----------+-------------+-------------+------------------+----------+-------------------------------+-------------------------------+----------+------------------
+        1 | blocked_session | critical |       23896 |       19700 |             47.2 | resolved | 2026-11-22 21:58:42.391367-06 | 2026-11-22 21:59:12.387827-06 | t        | t
+(1 row)
+
+$ ... "select count(*) from monitor.v_snapshot"
+6
+=> PASS. Note `observed_seconds` grows with later snapshots (32.2 at firing,
+47.2 at resolution) while `fired_at` stays fixed, so the firing-time value is
+only visible in the notifier line / collector log, not in the final table row.
+
+--------------------------------------------------------------------------------
+7. DASHBOARD (README §5.3)
+--------------------------------------------------------------------------------
+$ .venv/Scripts/python.exe -m streamlit run dashboard/app.py --server.port 8511
+  You can now view your Streamlit app in your browser.
+  Local URL: http://localhost:8511
+
+$ curl -s -o /dev/null -w "http_%{http_code}\n" http://127.0.0.1:8511/_stcore/health
+http_200
+$ curl -s http://127.0.0.1:8511/_stcore/health
+ok
+=> PASS.
+
+--------------------------------------------------------------------------------
+8. PROCESS AND CLUSTER CLEANUP (README §12)
+--------------------------------------------------------------------------------
+Only the processes started by this run were stopped, each by explicit PID
+(port owner via `netstat -ano | grep :8511 | grep LISTENING`, plus the exact
+`notify.py --interval 5` / streamlit PIDs); no `python` was killed by name.
+
+$ netstat -ano | grep :8511 | grep LISTENING      # before
+  TCP    0.0.0.0:8511           0.0.0.0:0              LISTENING       24236
+$ netstat -ano | grep :8511 | grep LISTENING      # after
+8511: none
+(no python.exe with a csce4355-repro command line remained)
+
+$ scripts/start_cluster.sh stop
+waiting for server to shut down.... done
+server stopped
+$ rm -rf .pgdata
+removed .pgdata
+$ netstat -ano | grep :55433 | grep LISTENING
+55433: no listener
+$ netstat -ano | grep :55432 | grep LISTENING
+  TCP    127.0.0.1:55432        0.0.0.0:0              LISTENING       18552
+=> PASS. Cleanup as documented; the live demo cluster was still listening.
+
+================================================================================
+G. README GAPS / FAILURES (each with the exact fix that worked)
+================================================================================
+
+G1. Port is not actually configurable through .env (README §4.1 table, and the
+    sentence "PGHOST, PGPORT, PGDATABASE | 127.0.0.1, 55432, shopdb").
+    Fact: scripts/start_cluster.sh computes `PORT="${PGPORT:-55432}"` (line 12)
+    BEFORE it sources .env (line 18), so at initdb time only the *exported*
+    shell variable matters. Editing .env alone silently leaves the cluster on
+    55432 while setup_db/collector/dashboard connect to .env's PGPORT.
+    Evidence: PORT_before_sourcing_env=55432 PGPORT_after_sourcing=55433.
+    Exact fix that worked: `export PGPORT=55433` in the shell before
+    `scripts/start_cluster.sh`, *and* `PGPORT=55433` in .env.
+    Suggested README edit (after §4.1 table):
+      "The cluster port is read from the environment at init time. To use a
+       different port, `export PGPORT=55433` before `scripts/start_cluster.sh`
+       and set the same `PGPORT` in `.env`; editing `.env` alone is not enough."
+    Suggested code fix: move `set -a; . ./.env; set +a` above `PORT=...` (guarded
+    by `[ -f .env ]`), then the README table becomes true.
+
+G2. start_cluster.sh cannot initialize the cluster when Git Bash's mktemp
+    returns an MSYS /tmp path (README §3 promises "Git Bash (bash, mktemp, sed)"
+    is sufficient).
+    Exact error: initdb: error: could not open file "/tmp/tmp.ffo4ThindV" for
+    reading: No such file or directory
+    Cause: scripts/start_cluster.sh:19 `pwfile="$(mktemp)"` produces
+    `/tmp/...`; native initdb.exe cannot open it when MSYS path conversion is
+    off. No .pgdata was created, so the retry was clean.
+    Exact fix that worked: `export TMPDIR='C:/Users/johnq/.../tmppw'` (any
+    native Windows directory) before running the script.
+    Suggested README edit (Prerequisites table, Ports row area):
+      "Git Bash must be able to hand native Windows paths to the PostgreSQL
+       binaries; if your shell sets TMPDIR=/tmp, run
+       `export TMPDIR=\"$LOCALAPPDATA/Temp\"` first."
+    Suggested code fix (one line): `pwfile="$(mktemp ./.pgpw.XXXXXX)"` — a
+    relative path inside the repo is readable by initdb.exe on every Git Bash.
+
+G3. README §6 omits the test databases entirely (biggest gap).
+    §6 says only `.venv/Scripts/python.exe -m pytest tests -v`. On a fresh
+    cluster that run fails: `2 failed, 16 errors`, first error
+    `FATAL: password authentication failed for user "postgres"`.
+    tests/conftest.py:4-7 requires shopdb_t2; tests/test_alert.py:4-5 requires
+    shopdb_t3.
+    Exact fix that worked: `scripts/setup_db.sh shopdb_t2` and
+    `scripts/setup_db.sh shopdb_t3` before pytest, then 18 passed.
+    Suggested README edit, replace §6 body with:
+      ```bash
+      scripts/setup_db.sh shopdb_t2     # tests/conftest.py
+      scripts/setup_db.sh shopdb_t3     # tests/test_alert.py
+      .venv/Scripts/python.exe -m pytest tests -v
+      ```
+      and replace the `TBD-VERIFY` sentence with the observed result:
+      "18 passed (9 alert, 3 capture, 6 privilege)."
+
+G4. UNRESOLVED: two consecutive pytest runs after the databases existed failed
+    with `password authentication failed` for all three roles (13x postgres,
+    3x monitor_reader, 2x shop_app), although `psql` with the same .env
+    credentials connected successfully at the same moment and an identical
+    re-run minutes later passed 18/18 (twice, including from a clean subshell).
+    Root cause not isolated; recorded here rather than guessed.
+    Contributing hazard: scripts/dbconf.py:31 lets any `PG*` variable in the
+    caller's environment override the corresponding `.env` value
+    (`env.update(... k.startswith("PG"))`), so the effective connection
+    parameters depend on the shell, not just on `.env`.
+    Exact fix that worked: run pytest from a shell where the `.env` values are
+    exported (`set -a; . ./.env; set +a`) or where no `PG*` variables exist.
+    Suggested README edit (§6): "Run the suite from a shell with no PG*
+    variables set (or with the .env values exported); dbconf merges ambient
+    PG* variables over .env."
+    Suggested code fix: in scripts/dbconf.py `load_env`, only take the password
+    keys and PGHOST/PGPORT/PGDATABASE from os.environ if `.env` lacks them.
+
+G5. Piping start_cluster.sh to `tee` hangs in Git Bash on Windows (the started
+    postgres server inherits the pipe, so tee never sees EOF). The run was
+    killed at its 300 s timeout and the cluster died with it; no data was lost
+    (restart was clean).
+    Exact fix that worked: `scripts/start_cluster.sh > log 2>&1`.
+    Suggested README edit (§4.2): "Redirect the script's output to a file
+    (`scripts/start_cluster.sh > start.log 2>&1`) rather than piping it;
+    piping can hang because the server inherits the pipe."
+
+G6. Minor: README §4.1 says `scripts/setup_db.sh` can generate `.env` itself,
+    but the generated file hardcodes `PGPORT=55432`
+    (scripts/setup_db.sh:18). With G1 this means the generated `.env` can never
+    select a different port. Same fix as G1.
+
+G7. Not a failure, for the record: README §5.4's order (start the lock demo
+    after the collector has taken at least one snapshot) reproduces exactly;
+    with `--hold 60` and a 15 s interval the sequence fire -> resolve completed
+    in six snapshots. `README §12` cleanup (`stop` + `rm -rf .pgdata`) worked
+    verbatim.
+
+================================================================================
+PASS/FAIL SUMMARY
+================================================================================
+S0  fresh clone, clean tree (8a0b226) ............................... PASS
+S1  venv + dependencies, versions match README §3 ................... PASS
+S2  .env generated, change-me values replaced ....................... PASS
+S3  start_cluster.sh, README-literal ................................ FAIL
+    start_cluster.sh with TMPDIR fix + exported PGPORT=55433 ........ PASS
+S4  setup_db.sh (main db: 17.11 / 1.11 / 1000 / 10000) .............. PASS
+S5  pytest tests -v, README-literal ................................. FAIL (G3)
+    pytest tests -v after creating shopdb_t2 + shopdb_t3 ............ PASS 18/18
+S6  collector 6 snapshots, lock edge captured ....................... PASS
+S7  alert fired (critical, blocked 23896 / blocker 19700, 32.2 s) ... PASS
+S8  notifier printed FIRED and RESOLVED exactly once ................ PASS
+S9  monitor.v_alerts read as monitor_reader shows resolved row ...... PASS
+S10 streamlit on 8511, /_stcore/health .............................. PASS (200, "ok")
+S11 stop only this run's processes by explicit PID .................. PASS
+S12 README cleanup: stop cluster + delete .pgdata ................... PASS
+S13 live cluster :55432 and Windows service :5432 untouched ......... PASS
+
+End of evidence.
+================================================================================

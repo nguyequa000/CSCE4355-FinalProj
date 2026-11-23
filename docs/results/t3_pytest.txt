@@ -1,0 +1,18 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.2.0, pluggy-1.7.0 -- C:\Users\johnq\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\johnq\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.worktrees\subagent-sa-1-0b387086
+plugins: anyio-4.16.0
+collecting ... collected 9 items
+
+tests/test_alert.py::test_below_threshold_does_not_alert PASSED          [ 11%]
+tests/test_alert.py::test_at_threshold_opens_alert_with_correct_times PASSED [ 22%]
+tests/test_alert.py::test_two_blockers_picks_lowest_blocker_pid PASSED   [ 33%]
+tests/test_alert.py::test_repeat_snapshot_keeps_single_open_alert_and_updates_observed PASSED [ 44%]
+tests/test_alert.py::test_clean_snapshot_resolves_open_alert_once PASSED [ 55%]
+tests/test_alert.py::test_disabled_rule_does_nothing PASSED              [ 66%]
+tests/test_alert.py::test_pid_reuse_after_previous_observation_starts_new_alert PASSED [ 77%]
+tests/test_alert.py::test_live_lock_contention_opens_then_resolves PASSED [ 88%]
+tests/test_alert.py::test_notifier_prints_each_alert_once PASSED         [100%]
+
+============================== 9 passed in 3.28s ==============================

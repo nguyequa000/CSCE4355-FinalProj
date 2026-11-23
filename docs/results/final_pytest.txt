@@ -1,0 +1,40 @@
+# Final full suite on freshly dropped+recreated test DBs, 2026-11-22 22:06:53 CST, commit 18bba55
+$ .venv/Scripts/python.exe -m pytest tests -v
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.2.0, pluggy-1.7.0 -- C:\Users\johnq\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\johnq\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project
+plugins: anyio-4.16.0
+collecting ... collected 29 items
+
+tests/test_alert.py::test_below_threshold_does_not_alert PASSED          [  3%]
+tests/test_alert.py::test_at_threshold_opens_alert_with_correct_times PASSED [  6%]
+tests/test_alert.py::test_two_blockers_picks_lowest_blocker_pid PASSED   [ 10%]
+tests/test_alert.py::test_repeat_snapshot_keeps_single_open_alert_and_updates_observed PASSED [ 13%]
+tests/test_alert.py::test_clean_snapshot_resolves_open_alert_once PASSED [ 17%]
+tests/test_alert.py::test_disabled_rule_does_nothing PASSED              [ 20%]
+tests/test_alert.py::test_pid_reuse_after_previous_observation_starts_new_alert PASSED [ 24%]
+tests/test_alert.py::test_live_lock_contention_opens_then_resolves PASSED [ 27%]
+tests/test_alert.py::test_notifier_prints_each_alert_once PASSED         [ 31%]
+tests/test_capture.py::test_unattended_snapshots_have_distinct_increasing_timestamps PASSED [ 34%]
+tests/test_capture.py::test_lock_wait_edge_captured_then_gone_but_history_kept PASSED [ 37%]
+tests/test_capture.py::test_db_stat_deltas_null_first_then_non_negative PASSED [ 41%]
+tests/test_extra_rules.py::test_idle_below_threshold_does_not_alert PASSED [ 44%]
+tests/test_extra_rules.py::test_idle_at_threshold_opens_warning_alert PASSED [ 48%]
+tests/test_extra_rules.py::test_long_active_query_below_threshold_does_not_alert PASSED [ 51%]
+tests/test_extra_rules.py::test_long_active_query_at_threshold_opens_and_ignores_lock_waits PASSED [ 55%]
+tests/test_extra_rules.py::test_idle_persists_single_open_alert_and_updates_observed PASSED [ 58%]
+tests/test_extra_rules.py::test_long_active_query_persists_without_duplicate PASSED [ 62%]
+tests/test_extra_rules.py::test_both_rules_resolve_on_first_clean_snapshot PASSED [ 65%]
+tests/test_extra_rules.py::test_collector_own_backend_is_excluded PASSED [ 68%]
+tests/test_extra_rules.py::test_new_episode_same_pid_reopens_alert PASSED [ 72%]
+tests/test_extra_rules.py::test_live_session_opens_then_resolves[idle-idle_in_transaction-idle in transaction-session_demo_idle] PASSED [ 75%]
+tests/test_extra_rules.py::test_live_session_opens_then_resolves[long-long_active_query-active-session_demo_long] PASSED [ 79%]
+tests/test_privileges.py::test_reader_can_select_every_monitor_view PASSED [ 82%]
+tests/test_privileges.py::test_reader_cannot_insert_alert_log PASSED     [ 86%]
+tests/test_privileges.py::test_reader_cannot_select_snapshot_base_table PASSED [ 89%]
+tests/test_privileges.py::test_reader_cannot_select_shop_customers PASSED [ 93%]
+tests/test_privileges.py::test_shop_app_cannot_select_monitor_alerts_view PASSED [ 96%]
+tests/test_privileges.py::test_shop_app_cannot_select_monitor_snapshot PASSED [100%]
+
+============================= 29 passed in 22.18s =============================

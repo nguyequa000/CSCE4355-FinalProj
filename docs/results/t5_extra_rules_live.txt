@@ -1,0 +1,170 @@
+Lane F live evidence — idle_in_transaction and long_active_query
+Generated: 2026-11-22 (Central) on the disposable PG17 cluster 127.0.0.1:55432
+Database: shopdb_t5 (separate from the live collector's shopdb)
+Schema: sql/10_monitor.sql + sql/20_alerts.sql + sql/21_extra_rules.sql
+
+Commands (sampling interval deliberately 30 s, not the production default 60 s,
+so both 100 s demonstrations fit before the 22:30 freeze; RULE thresholds stay 60 s):
+  python workload/session_demo.py --mode idle --hold 100 --database shopdb_t5 \
+      --log docs/results/t5_session_demo.jsonl
+  python scripts/collect.py --interval 30 --count 6 --db shopdb_t5
+  (same collector command for --mode long --hold 100)
+
+==============================================================================
+Run log (docs/results/t5_live_run.txt)
+==============================================================================
+=== idle_in_transaction run ===
+demo launch: 2026-11-22T21:54:04-06:00
+injection pid=22992 state=idle in transaction state_change=2026-11-22 21:54:04.593897-06 observed_now=0.293s
+collector start: 2026-11-22T21:54:04-06:00
+collector end: 2026-11-22T21:56:35-06:00
+demo end: 2026-11-22T21:56:35-06:00
+--- collector log ---
+collector: db=shopdb_t5 interval=30s count=6
+snapshot_id=1 captured_at=2026-11-22T21:54:05.221796-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=2 captured_at=2026-11-22T21:54:35.193458-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=3 captured_at=2026-11-22T21:55:05.197728-06:00 sessions=1 lock_edges=0 alerts_opened=1 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=4 captured_at=2026-11-22T21:55:35.186555-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=5 captured_at=2026-11-22T21:56:05.192292-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=1 evaluate_alerts=present
+snapshot_id=6 captured_at=2026-11-22T21:56:35.196671-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+--- demo log ---
+mode=idle pid=22992 hold=100s
+pid=22992 state=idle in transaction start=2026-11-23T03:54:04.593+00:00
+pid=22992 end=2026-11-23T03:55:44.590+00:00 ok=true
+event_log=C:\Users\johnq\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.worktrees\subagent-sa-1-3be78978\docs\results\t5_session_demo.jsonl
+
+=== long_active_query run ===
+demo launch: 2026-11-22T21:56:44-06:00
+injection pid=31668 state=active wait_event_type=Timeout query_start=2026-11-22 21:56:44.396725-06 observed_now=0.272s
+collector start: 2026-11-22T21:56:44-06:00
+collector end: 2026-11-22T21:59:15-06:00
+demo end: 2026-11-22T21:59:15-06:00
+--- collector log ---
+collector: db=shopdb_t5 interval=30s count=6
+snapshot_id=7 captured_at=2026-11-22T21:56:44.980417-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=8 captured_at=2026-11-22T21:57:14.953769-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=9 captured_at=2026-11-22T21:57:44.958026-06:00 sessions=1 lock_edges=0 alerts_opened=1 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=10 captured_at=2026-11-22T21:58:14.948452-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=11 captured_at=2026-11-22T21:58:44.953417-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=1 evaluate_alerts=present
+snapshot_id=12 captured_at=2026-11-22T21:59:14.942314-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+--- demo log ---
+mode=long pid=31668 hold=100s
+pid=31668 state=active query=pg_sleep start=2026-11-23T03:56:44.396+00:00
+pid=31668 end=2026-11-23T03:58:24.398+00:00 ok=true
+event_log=C:\Users\johnq\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.worktrees\subagent-sa-1-3be78978\docs\results\t5_session_demo.jsonl
+
+==============================================================================
+Collector log — idle run (docs/results/t5_collector_idle.log)
+==============================================================================
+collector: db=shopdb_t5 interval=30s count=6
+snapshot_id=1 captured_at=2026-11-22T21:54:05.221796-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=2 captured_at=2026-11-22T21:54:35.193458-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=3 captured_at=2026-11-22T21:55:05.197728-06:00 sessions=1 lock_edges=0 alerts_opened=1 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=4 captured_at=2026-11-22T21:55:35.186555-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=5 captured_at=2026-11-22T21:56:05.192292-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=1 evaluate_alerts=present
+snapshot_id=6 captured_at=2026-11-22T21:56:35.196671-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+
+==============================================================================
+Collector log — long run (docs/results/t5_collector_long.log)
+==============================================================================
+collector: db=shopdb_t5 interval=30s count=6
+snapshot_id=7 captured_at=2026-11-22T21:56:44.980417-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=8 captured_at=2026-11-22T21:57:14.953769-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=9 captured_at=2026-11-22T21:57:44.958026-06:00 sessions=1 lock_edges=0 alerts_opened=1 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=10 captured_at=2026-11-22T21:58:14.948452-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=11 captured_at=2026-11-22T21:58:44.953417-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=1 evaluate_alerts=present
+snapshot_id=12 captured_at=2026-11-22T21:59:14.942314-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+
+==============================================================================
+session_demo.py JSONL (docs/results/t5_session_demo.jsonl)
+==============================================================================
+{"database": "shopdb_t5", "ended_at": "2026-11-23T03:55:44.590+00:00", "hold_seconds": 100.0, "mode": "idle", "ok": true, "pid": 22992, "started_at": "2026-11-23T03:54:04.593+00:00"}
+{"database": "shopdb_t5", "ended_at": "2026-11-23T03:58:24.398+00:00", "hold_seconds": 100.0, "mode": "long", "ok": true, "pid": 31668, "started_at": "2026-11-23T03:56:44.396+00:00"}
+
+==============================================================================
+monitor_reader SQL output (SELECT * FROM monitor.v_alerts, delay arithmetic, snapshot cadence)
+==============================================================================
+### monitor_reader: SELECT * FROM monitor.v_alerts ORDER BY alert_id
+ alert_id |      rule_name      | severity | blocked_pid | blocker_pid |         first_seen_at         |          eligible_at          |           fired_at            | observed_seconds |          resolved_at          |  status  | notified_at | resolve_notified_at
+----------+---------------------+----------+-------------+-------------+-------------------------------+-------------------------------+-------------------------------+------------------+-------------------------------+----------+-------------+---------------------
+        1 | idle_in_transaction | warning  |       22992 |       22992 | 2026-11-22 21:54:04.593897-06 | 2026-11-22 21:55:04.593897-06 | 2026-11-22 21:55:05.197728-06 |             90.6 | 2026-11-22 21:56:05.192292-06 | resolved |             |
+        2 | long_active_query   | warning  |       31668 |       31668 | 2026-11-22 21:56:44.396725-06 | 2026-11-22 21:57:44.396725-06 | 2026-11-22 21:57:44.958026-06 |             90.6 | 2026-11-22 21:58:44.953417-06 | resolved |             |
+(2 rows)
+
+
+### monitor_reader: detection-delay arithmetic (fired_at vs eligible_at / first_seen_at)
+ alert_id |      rule_name      | blocked_pid |         first_seen_at         |          eligible_at          |           fired_at            |          resolved_at          | observed_seconds | fire_delay_after_eligible_s | fire_delay_after_first_seen_s | open_duration_s
+----------+---------------------+-------------+-------------------------------+-------------------------------+-------------------------------+-------------------------------+------------------+-----------------------------+-------------------------------+-----------------
+        1 | idle_in_transaction |       22992 | 2026-11-22 21:54:04.593897-06 | 2026-11-22 21:55:04.593897-06 | 2026-11-22 21:55:05.197728-06 | 2026-11-22 21:56:05.192292-06 |             90.6 |                       0.604 |                        60.604 |          59.995
+        2 | long_active_query   |       31668 | 2026-11-22 21:56:44.396725-06 | 2026-11-22 21:57:44.396725-06 | 2026-11-22 21:57:44.958026-06 | 2026-11-22 21:58:44.953417-06 |             90.6 |                       0.561 |                        60.561 |          59.995
+(2 rows)
+
+
+### monitor_reader: snapshot cadence
+ snapshot_id |          captured_at          | seconds_since_prev
+-------------+-------------------------------+--------------------
+           1 | 2026-11-22 21:54:05.221796-06 |
+           2 | 2026-11-22 21:54:35.193458-06 |             29.972
+           3 | 2026-11-22 21:55:05.197728-06 |             30.004
+           4 | 2026-11-22 21:55:35.186555-06 |             29.989
+           5 | 2026-11-22 21:56:05.192292-06 |             30.006
+           6 | 2026-11-22 21:56:35.196671-06 |             30.004
+           7 | 2026-11-22 21:56:44.980417-06 |              9.784
+           8 | 2026-11-22 21:57:14.953769-06 |             29.973
+           9 | 2026-11-22 21:57:44.958026-06 |             30.004
+          10 | 2026-11-22 21:58:14.948452-06 |             29.990
+          11 | 2026-11-22 21:58:44.953417-06 |             30.005
+          12 | 2026-11-22 21:59:14.942314-06 |             29.989
+(12 rows)
+
+==============================================================================
+Derived timing (from the timestamps above)
+==============================================================================
+rule=idle_in_transaction alert_id=1 pid=22992
+  injection (session start)            2026-11-23T03:54:04.593+00:00
+  threshold                            60 s
+  eligible_at (first_seen + 60 s)      2026-11-22 21:55:04.593897-06
+  fired_at (snapshot captured_at)      2026-11-22 21:55:05.197728-06
+  detection delay after eligible       0.604 s
+  detection delay after injection      60.605 s  (= 60 s threshold + sampling alignment)
+  session end (demo ended_at)          2026-11-23T03:55:44.590+00:00
+  resolved_at (first clean snapshot)   2026-11-22 21:56:05.192292-06
+  resolution delay after session end   20.602 s  (30 s sampling cadence)
+
+rule=long_active_query alert_id=2 pid=31668
+  injection (session start)            2026-11-23T03:56:44.396+00:00
+  threshold                            60 s
+  eligible_at (first_seen + 60 s)      2026-11-22 21:57:44.396725-06
+  fired_at (snapshot captured_at)      2026-11-22 21:57:44.958026-06
+  detection delay after eligible       0.561 s
+  detection delay after injection      60.562 s  (= 60 s threshold + sampling alignment)
+  session end (demo ended_at)          2026-11-23T03:58:24.398+00:00
+  resolved_at (first clean snapshot)   2026-11-22 21:58:44.953417-06
+  resolution delay after session end   20.555 s  (30 s sampling cadence)
+
+Notes
+-----
+- One open alert was created per rule/PID and no duplicates appeared; collector lines
+  show alerts_opened=1 once, then 0 while the condition persisted.
+- observed_seconds in v_alerts is the latest observed age, not the age at firing:
+  the alert row keeps being updated each snapshot until the condition clears, so it
+  ended at 90.6 s although the alert fired at 60.6/60.6 s of age.
+- The 30 s cadence bounds detection latency: eligibility fell just before a scheduled
+  sample in both runs (0.604 s / 0.561 s after eligible_at). With a 60 s cadence the
+  worst case is one extra interval, i.e. up to ~120 s after the state began.
+- Resolution is also sample-bounded: both sessions ended ~20.6 s before the next
+  snapshot that resolved the alert; a short episode can be missed entirely between
+  samples.
+- The run log's 'demo end' lines show when bash reaped the background job (it
+  printed after the collector exited); session_demo's own JSONL ended_at
+  (start + 100 s) is authoritative and is what the resolution delay above uses.
+- blocked_session remains the only critical rule; both new rules are severity=warning.
+- The blocked-session demo's blocker backend sits 'idle in transaction' while it holds
+  its row lock. If that hold exceeds 60 s, idle_in_transaction will ALSO fire for the
+  blocker. That is correct behaviour (it really is an idle open transaction), not a
+  duplicate of the waiter's blocked_session alert: different PID, different condition.
+- collector exclusion: the collector's own backend is absent from session_sample
+  (collect.py WHERE pid <> pg_backend_pid()) and evaluate_extra_rules also skips
+  snapshot.collector_pid; sessions=1 in the snapshots above equals the one demo backend.
+- blocker_pid repeats blocked_pid for both rules because alert_log.blocker_pid is NOT NULL
+  and these conditions have no blocker; documented in sql/21_extra_rules.sql.

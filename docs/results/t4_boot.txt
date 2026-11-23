@@ -1,0 +1,53 @@
+T4 dashboard boot + render evidence — 2026-11-22 21:32:16 CST
+worktree: /c/Users/johnq/Documents/test/School/CSCE4355/Assignment_Instruction/Final_Project/.worktrees/subagent-sa-2-831466a5
+python:   ../../.venv/Scripts/python.exe (Python 3.12.10)
+streamlit: 1.67.0
+
+== command ==
+DASH_DB=shopdb_t4 ../../.venv/Scripts/python.exe -m streamlit run dashboard/app.py --server.port 8501 --server.headless true --browser.gatherUsageStats false
+
+== server log (docs/results/t4_streamlit.log) ==
+2026-11-22 21:31:03.407 Uvicorn server started on :::8501
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8501
+  Network URL: http://100.69.3.203:8501
+  External URL: http://153.33.157.39:8501
+
+
+== curl http://127.0.0.1:8501/ ==
+HTTP 200  time 0.002436s
+== curl http://127.0.0.1:8501/_stcore/health ==
+ok  (HTTP 200)
+
+== exception scan of server log ==
+none
+
+== headless browser render (Chromium via CDP, viewport 1500x3000 @1.5x, light) ==
+page title: PostgreSQL Monitoring Dashboard (CSCE 4355)
+header: database shopdb_t4 | connected role monitor_reader | latest snapshot #6 | age 20 s
+status line: 'Collector current: latest snapshot #6 at 2026-11-22 21:35:23 CST (20s ago). Server clock 2026-11-22 21:35:41 CST.'
+sections present: 1 Alerts (1 open / 1 resolved), 2 Current blockers (2 edges), 3 Lock history (6 snapshots + line chart), 4 Session state chart + db stats table
+table cell proof (accessibility tree rows):
+  row | 2 blocked_session critical 4101 4100 2026-11-22 21:32:37 CST 2026-11-22 21:33:07 CST
+  row | 1 blocked_session critical 4051 4050 2026-11-22 21:31:15 CST 2026-11-22 21:32:45 CST   (resolved)
+  row | 6 2026-11-22 21:34:15 CST 4101 4100 shop_app shop_app psql psql idle in transaction
+  row | 1 2026-11-22 21:30:30 CST shopdb_t4 7 unknown unknown unknown unknown   (first-sample NULL deltas shown as unknown)
+
+== auto-refresh (st.fragment run_every=15s) ==
+rendered caption 21:31:34 CST -> 21:32:04 CST with no user interaction: refresh observed
+
+== stale-collector warning path (second instance, COLLECT_INTERVAL_SECONDS=5 -> threshold 12s) ==
+banner: 'STALE DATA: latest snapshot #6 captured 2026-11-22 21:30:44 CST is 110s old (> 12s = 2.5 x 5s interval). The collector may have stopped.'
+log: docs/results/t4_stale_check.log
+
+== empty database path (shopdb, monitor tables empty) ==
+  wrote C:\Users\johnq\AppData\Local\hermes\cache\scratch\t4_empty.html (3836 bytes) from db=shopdb role=monitor_reader snapshots=0
+renders 'No snapshots yet — start the collector.', 'No blocking at latest snapshot.', 'No open alerts.' without error
+
+== screenshot ==
+docs/results/t4_dev_dashboard_SYNTHETIC.png  (2250x4500 px, DEV/SYNTHETIC fixtures in shopdb_t4)
+
+== static fallback ==
+  wrote docs\results\dashboard_snapshot.html (11706 bytes) from db=shopdb_t4 role=monitor_reader snapshots=6

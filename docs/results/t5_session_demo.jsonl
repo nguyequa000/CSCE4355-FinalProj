@@ -1,0 +1,2 @@
+{"database": "shopdb_t5", "ended_at": "2026-11-23T03:55:44.590+00:00", "hold_seconds": 100.0, "mode": "idle", "ok": true, "pid": 22992, "started_at": "2026-11-23T03:54:04.593+00:00"}
+{"database": "shopdb_t5", "ended_at": "2026-11-23T03:58:24.398+00:00", "hold_seconds": 100.0, "mode": "long", "ok": true, "pid": 31668, "started_at": "2026-11-23T03:56:44.396+00:00"}

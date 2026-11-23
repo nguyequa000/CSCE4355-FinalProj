@@ -1,0 +1,6 @@
+# T1 evidence captured 2026-11-22 21:24:42 CST
+$ psql (as shop_app, fresh client)
+shop_app|17.11|1.11|1000|10000
+$ SHOW shared_preload_libraries (superuser)
+pg_stat_statements
+111

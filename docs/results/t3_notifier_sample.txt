@@ -1,0 +1,28 @@
+# T3 notifier sample — real lock contention, alert firing and recovery on shopdb_t3
+# generated 2026-11-23T03:37:12+00:00 (UTC); rule blocked_session threshold=30s severity=critical
+
+# workload was started separately with: python workload/lock_demo.py --database shopdb_t3 --hold 45 --log docs/results/t3_lock_demo_events.jsonl
+# sampling while waiter pid=2892 has waited 31.0s behind blocker pid=15256
+# snapshot=1 captured_at=2026-11-22T21:37:12.126907-06:00 lock_wait_rows=1 -> evaluate_alerts opened=1 resolved=0
+
+$ python notifier/notify.py --once --database shopdb_t3
+[ALERT FIRED] id=1 rule=blocked_session severity=critical blocked_pid=2892 blocker_pid=15256 fired_at=2026-11-22T21:37:12.126907-06:00 observed=31.0s
+
+# lock_demo console output (real):
+blocker_pid=15256 holds row customer_id=42
+waiter_pid=2892 injection=2026-11-23T03:36:41.147+00:00 (blocked by blocker_pid=15256)
+holding for 45s ...
+release=2026-11-23T03:37:26.146+00:00
+waiter_finished=2026-11-23T03:37:26.146+00:00 ok=true
+event_log=C:\Users\johnq\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.worktrees\subagent-sa-1-0b387086\docs\results\t3_lock_demo_events.jsonl
+
+# recovery sample snapshot=2 captured_at=2026-11-22T21:38:42.570676-06:00 lock_wait_rows=0 -> evaluate_alerts opened=0 resolved=1
+
+$ python notifier/notify.py --once --database shopdb_t3
+[ALERT RESOLVED] id=1 resolved_at=2026-11-22T21:38:42.570676-06:00
+
+$ python notifier/notify.py --once --database shopdb_t3   # second resolved pass: nothing new
+(no output: nothing left to notify)
+
+# monitor.alert_log rows (real):
+  1 | blocked_session | critical | 2892 | 15256 | 2026-11-22 21:36:41.092594-06:00 | 2026-11-22 21:37:11.092594-06:00 | 2026-11-22 21:37:12.126907-06:00 | 1 | 31.0 | 1 | 2026-11-22 21:38:42.570676-06:00 | 2 | 2026-11-22 21:37:12.429690-06:00 | 2026-11-22 21:38:42.865572-06:00

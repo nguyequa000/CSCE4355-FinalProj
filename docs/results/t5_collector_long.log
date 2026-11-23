@@ -1,0 +1,7 @@
+collector: db=shopdb_t5 interval=30s count=6
+snapshot_id=7 captured_at=2026-11-22T21:56:44.980417-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=8 captured_at=2026-11-22T21:57:14.953769-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=9 captured_at=2026-11-22T21:57:44.958026-06:00 sessions=1 lock_edges=0 alerts_opened=1 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=10 captured_at=2026-11-22T21:58:14.948452-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=11 captured_at=2026-11-22T21:58:44.953417-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=1 evaluate_alerts=present
+snapshot_id=12 captured_at=2026-11-22T21:59:14.942314-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present

@@ -1,0 +1,39 @@
+=== idle_in_transaction run ===
+demo launch: 2026-11-22T21:54:04-06:00
+injection pid=22992 state=idle in transaction state_change=2026-11-22 21:54:04.593897-06 observed_now=0.293s
+collector start: 2026-11-22T21:54:04-06:00
+collector end: 2026-11-22T21:56:35-06:00
+demo end: 2026-11-22T21:56:35-06:00
+--- collector log ---
+collector: db=shopdb_t5 interval=30s count=6
+snapshot_id=1 captured_at=2026-11-22T21:54:05.221796-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=2 captured_at=2026-11-22T21:54:35.193458-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=3 captured_at=2026-11-22T21:55:05.197728-06:00 sessions=1 lock_edges=0 alerts_opened=1 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=4 captured_at=2026-11-22T21:55:35.186555-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=5 captured_at=2026-11-22T21:56:05.192292-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=1 evaluate_alerts=present
+snapshot_id=6 captured_at=2026-11-22T21:56:35.196671-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+--- demo log ---
+mode=idle pid=22992 hold=100s
+pid=22992 state=idle in transaction start=2026-11-23T03:54:04.593+00:00
+pid=22992 end=2026-11-23T03:55:44.590+00:00 ok=true
+event_log=C:\Users\johnq\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.worktrees\subagent-sa-1-3be78978\docs\results\t5_session_demo.jsonl
+
+=== long_active_query run ===
+demo launch: 2026-11-22T21:56:44-06:00
+injection pid=31668 state=active wait_event_type=Timeout query_start=2026-11-22 21:56:44.396725-06 observed_now=0.272s
+collector start: 2026-11-22T21:56:44-06:00
+collector end: 2026-11-22T21:59:15-06:00
+demo end: 2026-11-22T21:59:15-06:00
+--- collector log ---
+collector: db=shopdb_t5 interval=30s count=6
+snapshot_id=7 captured_at=2026-11-22T21:56:44.980417-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=8 captured_at=2026-11-22T21:57:14.953769-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=9 captured_at=2026-11-22T21:57:44.958026-06:00 sessions=1 lock_edges=0 alerts_opened=1 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=10 captured_at=2026-11-22T21:58:14.948452-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=11 captured_at=2026-11-22T21:58:44.953417-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=1 evaluate_alerts=present
+snapshot_id=12 captured_at=2026-11-22T21:59:14.942314-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+--- demo log ---
+mode=long pid=31668 hold=100s
+pid=31668 state=active query=pg_sleep start=2026-11-23T03:56:44.396+00:00
+pid=31668 end=2026-11-23T03:58:24.398+00:00 ok=true
+event_log=C:\Users\johnq\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.worktrees\subagent-sa-1-3be78978\docs\results\t5_session_demo.jsonl

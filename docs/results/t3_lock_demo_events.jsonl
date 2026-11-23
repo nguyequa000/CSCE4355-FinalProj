@@ -1,0 +1,1 @@
+{"blocker_pid": 15256, "customer_id": 42, "database": "shopdb_t3", "hold_seconds": 45.0, "injected_at": "2026-11-23T03:36:41.147+00:00", "ok": true, "released_at": "2026-11-23T03:37:26.146+00:00", "waiter_finished_at": "2026-11-23T03:37:26.146+00:00", "waiter_pid": 2892}

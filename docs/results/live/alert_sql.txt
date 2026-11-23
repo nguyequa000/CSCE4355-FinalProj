@@ -1,0 +1,41 @@
+# Live blocked-session event, db=shopdb, queried as monitor_reader at 2026-11-22 21:46:10 CST
+# lock_demo: injection=2026-11-22 21:42:33.440 CST, release=2026-11-22 21:45:03.434 CST (docs/results/live/lock_demo.log)
+
+$ select * from monitor.v_alerts;
+-[ RECORD 1 ]-------+------------------------------
+alert_id            | 1
+rule_name           | blocked_session
+severity            | critical
+blocked_pid         | 35164
+blocker_pid         | 42028
+first_seen_at       | 2026-11-22 21:42:33.388184-06
+eligible_at         | 2026-11-22 21:43:03.388184-06
+fired_at            | 2026-11-22 21:43:25.213833-06
+observed_seconds    | 111.8
+resolved_at         | 2026-11-22 21:45:25.208184-06
+status              | resolved
+notified_at         | 2026-11-22 21:43:25.2677-06
+resolve_notified_at | 2026-11-22 21:45:25.274648-06
+
+$ lock history
+ snapshot_id |          captured_at          | blocked_pid | blocker_pid |   blocked_app    |    blocker_app    |    blocker_state    |         wait_started          | waited_seconds 
+-------------+-------------------------------+-------------+-------------+------------------+-------------------+---------------------+-------------------------------+----------------
+           2 | 2026-11-22 21:43:25.213833-06 |       35164 |       42028 | lock_demo_waiter | lock_demo_blocker | idle in transaction | 2026-11-22 21:42:33.388184-06 |           51.8
+           3 | 2026-11-22 21:44:25.22039-06  |       35164 |       42028 | lock_demo_waiter | lock_demo_blocker | idle in transaction | 2026-11-22 21:42:33.388184-06 |          111.8
+(2 rows)
+
+$ snapshots
+ snapshot_id |          captured_at          |       gap       
+-------------+-------------------------------+-----------------
+           1 | 2026-11-22 21:42:25.255894-06 | 
+           2 | 2026-11-22 21:43:25.213833-06 | 00:00:59.957939
+           3 | 2026-11-22 21:44:25.22039-06  | 00:01:00.006557
+           4 | 2026-11-22 21:45:25.208184-06 | 00:00:59.987794
+(4 rows)
+
+$ timing analysis
+ alert_id |         injection         |          eligible_at          |           fired_at            | fire_after_eligible | fire_after_injection |          release           |          resolved_at          | resolve_after_release | open_alerts_now 
+----------+---------------------------+-------------------------------+-------------------------------+---------------------+----------------------+----------------------------+-------------------------------+-----------------------+-----------------
+        1 | 2026-11-22 21:42:33.44-06 | 2026-11-22 21:43:03.388184-06 | 2026-11-22 21:43:25.213833-06 | 00:00:21.825649     | 00:00:51.773833      | 2026-11-22 21:45:03.434-06 | 2026-11-22 21:45:25.208184-06 | 00:00:21.774184       |               0
+(1 row)
+

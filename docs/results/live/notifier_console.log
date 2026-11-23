@@ -1,0 +1,2 @@
+[ALERT FIRED] id=1 rule=blocked_session severity=critical blocked_pid=35164 blocker_pid=42028 fired_at=2026-11-22T21:43:25.213833-06:00 observed=51.8s
+[ALERT RESOLVED] id=1 resolved_at=2026-11-22T21:45:25.208184-06:00
