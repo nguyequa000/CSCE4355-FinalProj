@@ -3,4 +3,4 @@ waiter_pid=35164 injection=2026-11-23T03:42:33.440+00:00 (blocked by blocker_pid
 holding for 150s ...
 release=2026-11-23T03:45:03.434+00:00
 waiter_finished=2026-11-23T03:45:03.441+00:00 ok=true
-event_log=C:\Users\johnq\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\docs\results\live\lock_demo_events.jsonl
+event_log=C:\Users<USER>\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\docs\results\live\lock_demo_events.jsonl

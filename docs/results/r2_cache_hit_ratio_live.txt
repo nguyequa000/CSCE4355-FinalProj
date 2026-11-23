@@ -1,0 +1,19 @@
+# Live cache_hit_ratio demo on shopdb_sat, started 2026-11-22T23:08:19.724-06:00
+# The seeded DB fits in shared_buffers, so the real hit ratio is ~1.0 and cannot drop below the 0.90 default.
+# Method: threshold_value temporarily set to 1.01 (any ratio < 1.01 qualifies) to exercise fire, then restored to 0.90 to exercise resolution.
+[baseline] snapshot_id=4 captured_at=2026-11-22T23:08:20.182745-06:00 sessions=2 lock_edges=0 alerts_opened=1 alerts_resolved=0 evaluate_alerts=present
+[after 20 seq scans of shop.orders, threshold 1.01] snapshot_id=5 captured_at=2026-11-22T23:08:21.240669-06:00 sessions=2 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+[again, threshold 1.01] snapshot_id=6 captured_at=2026-11-22T23:08:22.304201-06:00 sessions=2 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+[threshold restored to 0.90] snapshot_id=7 captured_at=2026-11-22T23:08:23.366120-06:00 sessions=2 lock_edges=0 alerts_opened=0 alerts_resolved=1 evaluate_alerts=present
+
+$ v_alerts where rule_name='cache_hit_ratio' (as monitor_reader)
+(2, 'cache_hit_ratio', 0, datetime.datetime(2026, 11, 22, 23, 8, 20, 182745, tzinfo=zoneinfo.ZoneInfo(key='America/Chicago')), Decimal('2.1'), datetime.datetime(2026, 11, 22, 23, 8, 23, 366120, tzinfo=zoneinfo.ZoneInfo(key='America/Chicago')), 'resolved')
+
+$ block deltas per snapshot (v_db_stats)
+(1, datetime.datetime(2026, 11, 22, 23, 7, 42, 805300, tzinfo=zoneinfo.ZoneInfo(key='America/Chicago')), None, None, None)
+(2, datetime.datetime(2026, 11, 22, 23, 7, 44, 498880, tzinfo=zoneinfo.ZoneInfo(key='America/Chicago')), 8779, 10, Decimal('0.9989'))
+(3, datetime.datetime(2026, 11, 22, 23, 7, 46, 496442, tzinfo=zoneinfo.ZoneInfo(key='America/Chicago')), 3930, 0, Decimal('1.0000'))
+(4, datetime.datetime(2026, 11, 22, 23, 8, 20, 182745, tzinfo=zoneinfo.ZoneInfo(key='America/Chicago')), 4478, 0, Decimal('1.0000'))
+(5, datetime.datetime(2026, 11, 22, 23, 8, 21, 240669, tzinfo=zoneinfo.ZoneInfo(key='America/Chicago')), 4357, 0, Decimal('1.0000'))
+(6, datetime.datetime(2026, 11, 22, 23, 8, 22, 304201, tzinfo=zoneinfo.ZoneInfo(key='America/Chicago')), 5953, 0, Decimal('1.0000'))
+(7, datetime.datetime(2026, 11, 22, 23, 8, 23, 366120, tzinfo=zoneinfo.ZoneInfo(key='America/Chicago')), 5692, 0, Decimal('1.0000'))

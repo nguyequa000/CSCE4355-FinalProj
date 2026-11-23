@@ -1,4 +1,4 @@
 mode=idle pid=22992 hold=100s
 pid=22992 state=idle in transaction start=2026-11-23T03:54:04.593+00:00
 pid=22992 end=2026-11-23T03:55:44.590+00:00 ok=true
-event_log=C:\Users\johnq\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.worktrees\subagent-sa-1-3be78978\docs\results\t5_session_demo.jsonl
+event_log=C:\Users<USER>\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.worktrees\subagent-sa-1-3be78978\docs\results\t5_session_demo.jsonl

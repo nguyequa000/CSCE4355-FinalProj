@@ -1,0 +1,23 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.2.0, pluggy-1.7.0 -- <HOME>\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: <HOME>\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.worktrees\subagent-sa-1-ca51d2eb
+plugins: anyio-4.16.0
+collecting ... collected 14 items
+
+tests/test_more_rules.py::test_table_stat_sample_contract_and_rule_defaults PASSED [  7%]
+tests/test_more_rules.py::test_connection_saturation_below_threshold_no_alert PASSED [ 14%]
+tests/test_more_rules.py::test_connection_saturation_at_threshold_opens_warning PASSED [ 21%]
+tests/test_more_rules.py::test_connection_saturation_persists_without_duplicate_then_resolves PASSED [ 28%]
+tests/test_more_rules.py::test_cache_hit_ratio_below_threshold_no_alert PASSED [ 35%]
+tests/test_more_rules.py::test_cache_hit_ratio_exactly_at_threshold_no_alert PASSED [ 42%]
+tests/test_more_rules.py::test_cache_hit_ratio_insufficient_window_is_unknown PASSED [ 50%]
+tests/test_more_rules.py::test_cache_hit_ratio_opens_persists_and_resolves PASSED [ 57%]
+tests/test_more_rules.py::test_cache_hit_ratio_insufficient_window_does_not_resolve PASSED [ 64%]
+tests/test_more_rules.py::test_dead_tuple_risk_below_dead_count_no_alert PASSED [ 71%]
+tests/test_more_rules.py::test_dead_tuple_risk_below_ratio_no_alert PASSED [ 78%]
+tests/test_more_rules.py::test_dead_tuple_risk_at_threshold_opens_per_table PASSED [ 85%]
+tests/test_more_rules.py::test_dead_tuple_risk_persists_without_duplicate_then_resolves PASSED [ 92%]
+tests/test_more_rules.py::test_dead_tuple_risk_empty_table_sample_is_unknown_not_clean PASSED [100%]
+
+============================= 14 passed in 1.99s ==============================
