@@ -40,13 +40,13 @@ One alert opened and resolved:
 
 | Moment | Time (CST) | Source |
 |---|---|---|
-| Lock injected: PID 35164 waits on PID 42028 (`lock_demo_blocker`, idle in transaction) | 21:42:33.440 | `docs/results/live/lock_demo.log` |
-| Wait start stored by the collector (`first_seen_at`) | 21:42:33.388 | `docs/results/live/alert_sql.txt` |
-| Threshold crossed (`eligible_at`, +30 s) | 21:43:03.388 | `docs/results/live/alert_sql.txt` |
-| Alert 1 fired, `observed_seconds` 51.8 | 21:43:25.214 | `docs/results/live/alert_sql.txt` |
-| Notifier printed the alert | 21:43:25.268 | `docs/results/live/notifier_console.log` |
+| Lock injected: PID 35164 waits on PID 42028 (`lock_demo_blocker`, idle in transaction) | `docs/results/live/lock_demo.log` |
+| Wait start stored by the collector (`first_seen_at`) | `docs/results/live/alert_sql.txt` |
+| Threshold crossed (`eligible_at`, +30 s) | `docs/results/live/alert_sql.txt` |
+| Alert 1 fired, `observed_seconds` 51.8 | `docs/results/live/alert_sql.txt` |
+| Notifier printed the alert | `docs/results/live/notifier_console.log` |
 | Lock released | 21:45:03.434 | `docs/results/live/lock_demo.log` |
-| Alert resolved, open alerts 0 | 21:45:25.208 | `docs/results/live/alert_sql.txt` |
+| Alert resolved, open alerts 0 | `docs/results/live/alert_sql.txt` |
 
 Detection took 51.8 s against the proposal's 120 s (two-interval) target and resolution took 21.8 s
 after release; no duplicate alert was opened while the wait persisted. The dashboard showed the same
