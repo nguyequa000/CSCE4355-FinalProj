@@ -16,8 +16,8 @@ the history to a read-only dashboard role.
 The delivered demonstration is deliberately narrow: **one DBA workflow, end to end** — a simulated
 shop develops lock contention, the collector preserves who blocked whom, the rule fires, the console
 notifier reports it, the dashboard shows the same event, the alert resolves after the lock clears.
-The proposal's six alert rules, six shop tables, Grafana dashboard, Docker Compose stack and
-`pg_cron` scheduling are **not** all delivered; §10 states exactly what is and is not implemented.
+The proposal's Grafana dashboard, a tested Docker Compose / `pg_cron` stack and proposal-scale data
+are **not** delivered; §10 states exactly what is and is not implemented.
 
 ### 1.1 Verified result (live run, 2026-11-22)
 
@@ -43,7 +43,24 @@ Two further rules were verified in a separate live run on `shopdb_t5`: `idle_in_
 20.602 s after the session ended; `long_active_query` fired 60.562 s after the query started
 (0.561 s after eligibility) and resolved 20.555 s after the session ended. Both runs used a 30 s
 collector cadence, not the 60 s default, so the timing is sample-bounded as disclosed in
-`docs/results/t5_extra_rules_live.txt`. Three of the six proposed rules are now verified live.
+`docs/results/t5_extra_rules_live.txt`.
+
+The other three rules were verified in a live run on 2026-11-23 (`workload/live_verify_more_rules.py`,
+output in `docs/results/live_more_rules.txt`). Each scenario ran on its own freshly rebuilt database
+with the shipped default thresholds, and every snapshot came from the real collector entry point
+`monitor.capture_snapshot()`; the rules were never called directly and `alert_rule` was never edited.
+
+| Rule | Load applied | Opened | Resolved |
+|---|---|---|---|
+| `dead_tuple_risk` | `UPDATE` of 3000 of 10000 `shop.orders` rows | next snapshot (alert 1) | snapshot after `VACUUM shop.orders` |
+| `connection_saturation` | 80 `shop_app` connections held open (`max_connections` = 100) | next snapshot | snapshot after they closed |
+| `cache_hit_ratio` | cluster restarted (cold buffers), 145 MB scratch table scanned: hit ratio 0.339 | next snapshot | after 20 s of cached `pgbench` reads, ratio 1.000 |
+
+The script took snapshots back to back rather than on the 60 s schedule, so these runs prove that each
+rule opens and resolves through the real pipeline, not detection latency. All six proposed rules now have
+a captured live run. Preparing these runs exposed that the scheduled collector never called these
+three rules or filled the table-sample history `dead_tuple_risk` reads; both calls were added
+(`sql/20_alerts.sql`, `sql/12_capture_snapshot.sql`) with a regression test.
 
 A fresh-clone reproduction was run by the team's automated tooling — **self-tested by team tooling,
 not independently reproduced by a teammate**. It reproduced T1–T7 end to end (cluster, schema,
@@ -293,7 +310,16 @@ env -u PGPASSWORD -u PG_SUPERUSER -u PGHOST -u PGPORT -u PGDATABASE \
     .venv/Scripts/python.exe -m pytest tests -v
 ```
 
-The suite is six files. The recorded run below covered four of them (29 tests): `tests/test_capture.py` (3 tests: unattended snapshots with
+The suite is six files and 51 tests. One command runs everything, each suite against its own
+database, and saves a pass/fail table to `docs/results/`:
+
+```bash
+.venv/Scripts/python.exe tests/run_tests.py --rebuild   # drops and recreates the test databases first
+.venv/Scripts/python.exe tests/run_tests.py --list      # suites and the databases they use
+```
+
+The 51-test run on freshly rebuilt databases is `docs/results/test_run_20261123_010716.txt`. The
+earlier recorded run below covered four of the files (29 tests): `tests/test_capture.py` (3 tests: unattended snapshots with
 distinct timestamps, lock-edge destroyed-but-kept history, delta correctness),
 `tests/test_privileges.py` (6 tests: reader allowed on every view, reader denied on base tables and
 `shop`, app denied on `monitor`), `tests/test_alert.py` (9 tests: threshold eligibility, one open
@@ -307,15 +333,14 @@ rule). The full suite on freshly dropped and recreated test databases is `29 pas
 + privileges) and `9 passed in 3.28s` (`docs/results/t3_pytest.txt`, alert).
 
 `tests/test_more_rules.py` covers the three rules in `sql/22_more_rules.sql` (connection saturation,
-cache hit ratio, dead-tuple risk); like `test_history.py` it postdates the recorded run.
+cache hit ratio, dead-tuple risk) plus a check that the scheduled collector actually reaches them
+(15 tests).
 
 `tests/test_history.py` (7 tests, M1–M3, runs on `shopdb_t2`) adds: six shop tables with the
 intentional missing index and consistent order totals, `pg_monitor` membership, every history table
 filled by one `capture_snapshot()` call, `NULL`-then-non-negative table/index/statement deltas
 (including a `seq_scan_delta` of at least 3 after three unindexed lookups), normalized statement text
-with password-bearing text excluded, reader access to the new views only, and purge retention. Those
-recorded results predate it: **rebuild `shopdb_t2` with `scripts/setup_db.sh shopdb_t2` and re-run the
-suite before quoting a new total.**
+with password-bearing text excluded, reader access to the new views only, and purge retention. Both files are included in the 51-test run above.
 
 ## 7. Evidence index
 
@@ -344,7 +369,9 @@ captured files.
 | `docs/results/t5_extra_rules_live.txt` | `idle_in_transaction` and `long_active_query`: one alert each, fired 60.605 s / 60.562 s after injection and resolved 20.602 s / 20.555 s after the sessions ended, at a 30 s cadence | Captured 21:54–21:59 CST |
 | `docs/results/t5_extra_rules_pytest.txt` | `tests/test_extra_rules.py` `11 passed in 18.41s`; `tests/test_alert.py` `9 passed in 3.47s` after the change | Captured 21:59:43 CST |
 | `docs/results/final_pytest.txt` | Full suite on freshly dropped and recreated test databases: `29 passed in 22.18s` | Captured 22:06:53 CST |
-| `docs/results/pgbench_overhead.txt` | Three collector-off / three collector-on `pgbench` runs | Not measured |
+| `docs/results/test_run_20261123_010716.txt` | `tests/run_tests.py --rebuild`: six suites, `51 passed` on freshly rebuilt databases | Captured 2026-11-23 01:07 CST |
+| `docs/results/live_more_rules.txt` | `connection_saturation`, `cache_hit_ratio`, `dead_tuple_risk` each opening and resolving through `capture_snapshot()`, 9/9 checks | Captured 2026-11-23 01:05 CST |
+| `docs/results/perf_overhead_run1.txt`, `perf_overhead_run2.txt` | Collector overhead, 3 off / 3 on `pgbench` runs each (10 s collector interval): `-8.50 %` and `-1.58 %` TPS with the collector on | Captured 2026-11-23; see §10 |
 
 ## 8. Repository structure
 
@@ -380,6 +407,8 @@ Final_Project/
 │   └── 90_cron_jobs.sql          pg_cron schedule (no-op without pg_cron) — M3
 ├── workload/
 │   ├── lock_demo.py              two-session row-lock contention generator
+│   ├── live_verify_more_rules.py live check that the three newer rules open and resolve
+│   ├── run_pgbench.sh            read / write / mixed baseline load (workload/pgbench/*.sql)
 │   ├── session_demo.py           idle-in-transaction / long-query session generator
 │   ├── stress_demo.py            load generator for the stress scenario
 │   └── seed_data.py              proposal-scale synthetic shop data (Faker, COPY) — M1
@@ -389,7 +418,7 @@ Final_Project/
 │   ├── app.py                    Streamlit dashboard (monitor_reader)
 │   ├── static_report.py          static HTML snapshot of the dashboard
 │   └── dev_fixtures*.sql         development fixtures
-├── tests/                        pytest suite: test_capture, test_privileges, test_alert,
+├── tests/                        run_tests.py runner + pytest suite: test_capture, test_privileges, test_alert,
 │                                 test_extra_rules, test_more_rules, test_history
 ├── docs/
 │   ├── results/                  captured evidence (see §7)
@@ -403,20 +432,20 @@ Final_Project/
 
 ## 9. Status of alert rules
 
-`blocked_session`, `idle_in_transaction` and `long_active_query` are verified live in this build.
-`connection_saturation`, `cache_hit_ratio` and `dead_tuple_risk` are implemented in
-`sql/22_more_rules.sql` and covered by `tests/test_more_rules.py`, but have no captured live run yet,
-so they are not counted as verified. A rule is called **verified** only when a captured run shows
-the alert opening and resolving.
+All six rules are implemented and each has a captured live run in which the alert opens and
+resolves. `blocked_session`, `idle_in_transaction` and `long_active_query` were verified on 2026-11-22;
+`connection_saturation`, `cache_hit_ratio` and `dead_tuple_risk` (`sql/22_more_rules.sql`) on
+2026-11-23. A rule is called **verified** only when a captured run shows the alert opening and
+resolving. Thresholds and severities of the newer rules differ from the proposal, as shown below.
 
 | Rule (proposal §8.2) | Threshold | Severity | Status |
 |---|---|---|---|
 | Blocked sessions | wait ≥ 30 s | critical | **Verified (live)** — alert 1 opened 21:43:25.214 and resolved 21:45:25.208 (`docs/results/live/alert_sql.txt`) |
 | Idle in transaction | > 60 s | warning | **Verified (live, 30 s cadence)** — alert 1 opened 21:55:05.198, 60.605 s after injection (0.604 s after eligibility), resolved 21:56:05.192, 20.602 s after the session ended (`docs/results/t5_extra_rules_live.txt`) |
 | Long-running query | active > 60 s | warning | **Verified (live, 30 s cadence)** — alert 2 opened 21:57:44.958, 60.562 s after the query started (0.561 s after eligibility), resolved 21:58:44.953, 20.555 s after the session ended (same file) |
-| Connection saturation | ≥ 80 % of `max_connections` | warning | Implemented (`sql/22_more_rules.sql`); no live run captured |
-| Low cache hit ratio | < 90 % over 5 min (≥ 100 blocks) | warning | Implemented (`sql/22_more_rules.sql`); no live run captured |
-| Table bloat risk | ≥ 1000 dead tuples and dead/(live+dead) ≥ 20 % | warning | Implemented as `dead_tuple_risk` (`sql/22_more_rules.sql`); no live run captured |
+| Connection saturation | ≥ 80 % of `max_connections` | warning | **Verified (live, back-to-back snapshots)** — `docs/results/live_more_rules.txt` |
+| Low cache hit ratio | < 90 % over 5 min (≥ 100 blocks) | warning | **Verified (live, back-to-back snapshots)** — same file |
+| Table bloat risk | ≥ 1000 dead tuples and dead/(live+dead) ≥ 20 % | warning | Implemented as `dead_tuple_risk`; **verified (live, back-to-back snapshots)** — same file |
 
 The two extra rules are implemented in `sql/21_extra_rules.sql` as
 `monitor.evaluate_extra_rules(snapshot_id)`, called from `monitor.evaluate_alerts()` when the
@@ -438,12 +467,15 @@ Disclosed deviations from the approved proposal (all of them also appear in repo
 | Scheduler | `pg_cron` in-database job | `pg_cron` jobs in Docker (`sql/90_cron_jobs.sql`); Python loop on the Windows cluster; both call `monitor.capture_snapshot()` |
 | Dashboard | Provisioned Grafana | Streamlit app on port 8501 (Grafana service available under a Compose profile, unprovisioned) |
 | Shop schema | 6 tables, ~100k customers / ~1M orders | 6 tables, **1,000 / 10,000** deterministic rows by default; `workload/seed_data.py` for proposal scale (not yet run) |
-| History | Session, statement, table, index, lock and database history; hourly rollup; retention | All six histories and a 7-day purge function (M2/M3); no hourly rollup |
-| Alert rules | 6 | 6 implemented; 3 verified live (`blocked_session`, `idle_in_transaction`, `long_active_query`); saturation, cache ratio and dead-tuple risk (`sql/22_more_rules.sql`) have tests but no captured live run; thresholds and severities differ from the proposal (see §9) |
-| Overhead | `< 5 %` pgbench impact | **Not measured** |
+| History | Session, statement, table, index, lock and database history; hourly rollup; retention | All six histories and a 7-day purge function (M2/M3); hourly rollup as a plain view, `monitor.v_hourly_rollup` (`sql/14_history.sql`), not a materialized view |
+| Alert rules | 6 | 6 implemented and verified live (§1.1, §9); thresholds and severities of the newer three differ from the proposal (§9) |
+| Overhead | `< 5 %` pgbench impact | Measured twice (3 off / 3 on `pgbench` runs, collector at a 10 s interval): `-8.50 %` and `-1.58 %` TPS with the collector on. Single runs swing by 10 % or more in both directions on a laptop, so this neither confirms nor refutes the 5 % target |
 | Recording | Required video | **Outstanding** |
 
 Further limitations:
+
+- The overhead measurement was made on a single laptop with background processes running; three runs
+  per arm cannot support a significance claim (`docs/results/perf_overhead_run1.txt`, `..._run2.txt`).
 
 - Sampling, not tracing: events shorter than one collection interval can fall between snapshots.
   The lock demo holds for 150 s precisely to avoid that; the limitation remains for real workloads.
