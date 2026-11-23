@@ -45,9 +45,9 @@
 -- threshold_seconds column is NOT NULL and is not meaningful for these rules;
 -- their rows store 0 there and the real threshold in threshold_value.
 --
--- monitor.table_stat_sample is normally created by sql/12_history.sql.  The
+-- monitor.table_stat_sample is normally created by sql/14_history.sql.  The
 -- CREATE TABLE IF NOT EXISTS below repeats the same contract so this file also
--- works on a database built without sql/12_history.sql.
+-- works on a database built without sql/14_history.sql.
 SET ROLE monitor_collector;
 
 CREATE TABLE IF NOT EXISTS monitor.table_stat_sample (

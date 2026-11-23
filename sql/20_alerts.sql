@@ -162,6 +162,16 @@ BEGIN
         v_resolved := v_resolved + v_extra_resolved;
     END IF;
 
+    -- connection_saturation, cache_hit_ratio and dead_tuple_risk live in
+    -- sql/22_more_rules.sql; guarded the same way as the extra rules above.
+    IF to_regprocedure('monitor.evaluate_more_rules(bigint)') IS NOT NULL THEN
+        SELECT COALESCE(sum(x.opened), 0), COALESCE(sum(x.resolved), 0)
+          INTO v_extra_opened, v_extra_resolved
+          FROM monitor.evaluate_more_rules(p_snapshot_id) x;
+        v_opened := v_opened + v_extra_opened;
+        v_resolved := v_resolved + v_extra_resolved;
+    END IF;
+
     RETURN QUERY SELECT v_opened, v_resolved;
 END;
 $fn$;

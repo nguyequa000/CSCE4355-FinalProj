@@ -1,4 +1,4 @@
--- 12_history.sql  (run as superuser, connected to the project database, after
+-- 14_history.sql  (run as superuser, connected to the project database, after
 -- sql/10_monitor.sql; the project setup script applies it before sql/20_alerts.sql)
 --
 -- Enriched monitoring history on top of the T2 snapshot tables:

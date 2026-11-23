@@ -284,6 +284,13 @@ BEGIN
     ) f;
     GET DIAGNOSTICS v_indexes = ROW_COUNT;
 
+    -- 7b. per-table sample history (sql/14_history.sql). The dead_tuple_risk rule
+    --     reads monitor.table_stat_sample; guarded so a database built without
+    --     that file still collects the other history tables. ----------------
+    IF to_regprocedure('monitor.collect_extra(bigint)') IS NOT NULL THEN
+        PERFORM monitor.collect_extra(v_sid);
+    END IF;
+
     -- 8. alert rules (Zach's module), same transaction as the rows they read ---
     IF to_regprocedure('monitor.evaluate_alerts(bigint)') IS NOT NULL THEN
         SELECT e.opened, e.resolved INTO v_opened, v_resolved

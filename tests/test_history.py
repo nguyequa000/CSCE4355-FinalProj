@@ -181,7 +181,11 @@ def test_statement_history_keeps_normalized_text_and_no_password_text(
             (sid,),
         ).fetchall()
     ]
-    probe = [t for t in texts if "shop.order_items" in t and "product_id" in t]
+    # only the lookup SELECT: pg_stat_statements also keeps the setup-time CREATE TABLE
+    # and seed INSERT for shop.order_items, which legitimately contain literal text
+    probe = [t for t in texts
+             if t.lstrip().upper().startswith("SELECT")
+             and "shop.order_items" in t and "product_id" in t]
     assert probe, "the order_items lookup is missing from statement_history"
     assert all("$1" in t and "11" not in t for t in probe), f"not normalized: {probe}"
     assert not [t for t in texts if "password" in t.lower()], "password text was stored"

@@ -1,0 +1,11 @@
+Test run 2026-11-23 01:07:16 Central Standard Time
+suite        result passed failed   secs  proves
+------------------------------------------------------------------------------------------
+capture      PASS        3      0    2.7  snapshots are written, lock edges survive, deltas are non-negative
+privileges   PASS        6      0    1.8  reader sees views only; app cannot touch monitor schema
+history      PASS        7      0    2.6  all history tables fill; retention purge; no password text stored
+alerts       PASS        9      0    5.2  lock contention opens a blocked_session alert and resolves it
+extra_rules  PASS       11      0   21.5  idle_in_transaction and long_active_query open and resolve
+more_rules   PASS       15      0    4.4  connection_saturation, cache_hit_ratio, dead_tuple_risk open and resolve
+------------------------------------------------------------------------------------------
+TOTAL: 51 passed, 0 failed -> PASS
