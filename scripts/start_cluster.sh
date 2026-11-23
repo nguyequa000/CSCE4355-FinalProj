@@ -27,6 +27,7 @@ port = $PORT
 shared_preload_libraries = 'pg_stat_statements'
 pg_stat_statements.track = all
 track_activity_query_size = 2048
+track_io_timing = on
 log_lock_waits = on
 deadlock_timeout = 1s
 EOF

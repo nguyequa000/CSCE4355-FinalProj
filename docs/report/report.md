@@ -172,8 +172,8 @@ Each collection cycle is a single logical pass over the live statistics:
 5. Call `monitor.evaluate_alerts()` so that alert state is derived from the rows just stored.
 
 The privilege boundary is part of the architecture, not an afterthought: `shop_app` has no rights in
-`monitor`; `monitor_collector` owns `monitor` and is a member of `pg_read_all_stats` so it can see
-other sessions; `monitor_reader` has `USAGE` on the schema and `SELECT` on the six `v_*` views only.
+`monitor`; `monitor_collector` owns `monitor` and is a member of `pg_monitor` so it can see
+other sessions; `monitor_reader` has `USAGE` on the schema and `SELECT` on the `v_*` views only.
 The dashboard therefore cannot read base tables, cannot read `shop`, and cannot write anything.
 
 # 3. Database Design
@@ -207,10 +207,24 @@ regions, and 10,000 orders whose `customer_id` is `1 + (g * 7) % 1000`, spread o
 and a bounded amount. `customer_id = 1` therefore has ten orders and is the row the lock
 demonstration targets. `ANALYZE` runs at the end so the planner has statistics immediately.
 
-The seed is smaller than the proposal's target of ~100,000 customers and ~1,000,000 orders, and the
-proposal's `products`, `order_items`, `inventory` and `payments` tables are absent. The reason is
-time: two tables are sufficient to produce and hold a row-level lock, and the reduced seed keeps
-cluster creation and reproduction fast. The reduction is disclosed again in Section 8.
+The remaining four proposal tables were added in M1 (Dustin Dowell): `shop.products` (identity key,
+unique `sku`, `CHECK (unit_price >= 0)`), `shop.inventory` (one row per product, non-negative
+quantities), `shop.order_items` (primary key `(order_id, line_no)`, foreign keys to `orders` with
+`ON DELETE CASCADE` and to `products`, positive quantity) and `shop.payments` (identity key, method
+and status `CHECK` lists, `payments_order_id_idx`). They are seeded deterministically as well:
+200 products and inventory rows, 20,000 order lines, and one payment for each of the 7,500 orders
+that left `new`. Each order's `total_amount` is now the sum of its lines, computed from a temporary
+table before the orders are inserted so the seed leaves no dead tuples. `shop_app` receives
+`SELECT`, `INSERT` and `UPDATE` on all six tables and `USAGE` on their identity sequences, still
+without `DELETE`.
+
+One index is left out on purpose: `shop.order_items(product_id)`. A lookup such as "which orders
+contain product X" therefore scans `order_items` sequentially, which is the proposal's demonstrable
+missing-index scenario; `monitor.table_stats_history.seq_scan_delta` records each scan.
+
+The default seed stays far below the proposal's ~100,000 customers and ~1,000,000 orders so that
+test databases build in seconds. `workload/seed_data.py` replaces it with the proposal-scale data set
+on demand (Faker names, skewed customer and product popularity, streamed with `COPY`).
 
 ## 3.2 The `monitor` schema
 
@@ -226,6 +240,9 @@ Table 4: History and alerting tables in the `monitor` schema.
 | `monitor.session_sample` | one row per client backend per snapshot | `pid`, `usename`, `application_name`, `state`, `wait_event_type`, `wait_event`, `xact_start`, `query_start`, `state_change`, `blocked_by integer[]`, 60-character `query_excerpt`; primary key `(snapshot_id, pid)` |
 | `monitor.lock_wait` | one row per blocked/blocker edge per snapshot | PIDs, both users and application names, blocker state, `wait_started`, `waited_seconds`; primary key `(snapshot_id, blocked_pid, blocker_pid)` |
 | `monitor.db_stat_sample` | one row per database per snapshot | `numbackends`, cumulative counters, `stats_reset`, and non-negative deltas; primary key `(snapshot_id, datname)` |
+| `monitor.statement_history` | one row per statement per snapshot (top 500 by total time) | `pg_stat_statements` counters, 500-character normalized text, role name, deltas; primary key `(snapshot_id, queryid, userid, toplevel)` (M2) |
+| `monitor.table_stats_history` | one row per user table per snapshot | scan, tuple, live/dead tuple, I/O and vacuum/analyze counters, `pg_total_relation_size`, deltas; primary key `(snapshot_id, relid)` (M2) |
+| `monitor.index_stats_history` | one row per user index per snapshot | `idx_scan`, tuples, I/O, unique/primary flags, size, deltas; primary key `(snapshot_id, indexrelid)` (M2) |
 | `monitor.alert_rule` | one row per rule name | `threshold_seconds`, `severity` (`info`/`warning`/`critical`), `enabled`, `description` |
 | `monitor.alert_log` | one row per alert | rule, severity, both PIDs, `first_seen_at`, `eligible_at`, `fired_at`, `fired_snapshot_id`, `observed_seconds`, `last_seen_snapshot_id`, `resolved_at`, `resolved_snapshot_id`, `notified_at`, `resolve_notified_at` |
 
@@ -248,8 +265,9 @@ used by the views.
 
 ## 3.4 Reporting views
 
-Six views form the reader-facing contract. They are created by `monitor_collector` and granted to
-`monitor_reader`; base tables are never granted.
+Six views form the reader-facing contract below; M2 adds three more over the new history tables
+(`v_statement_history`, `v_table_stats_history`, `v_index_stats_history`). All are created by
+`monitor_collector` and granted to `monitor_reader`; base tables are never granted.
 
 Table 5: Reporting views exposed to `monitor_reader`.
 
@@ -273,8 +291,8 @@ Table 6: Login roles and their effective privileges.
 
 | Role | Membership / attributes | Privileges | Denied |
 |---|---|---|---|
-| `shop_app` | `LOGIN` | `USAGE` on `shop`; `SELECT`, `INSERT`, `UPDATE` on `shop.customers` and `shop.orders` | No access to `monitor`; no `DELETE`; no DDL |
-| `monitor_collector` | `LOGIN`, member of `pg_read_all_stats` | Owns `monitor`; full DDL/DML there; can read all sessions' statistics | No rights in `shop` |
+| `shop_app` | `LOGIN` | `USAGE` on `shop`; `SELECT`, `INSERT`, `UPDATE` on all six `shop` tables; `USAGE` on their sequences | No access to `monitor`; no `DELETE`; no DDL |
+| `monitor_collector` | `LOGIN`, member of `pg_monitor` (which includes `pg_read_all_stats`) | Owns `monitor`; full DDL/DML there; can read all sessions' statistics; runs the `pg_cron` collector and purge jobs | No rights in `shop` |
 | `monitor_reader` | `LOGIN` | `USAGE` on `monitor`; `SELECT` on the six `v_*` views | No base-table access, no writes, no `shop` access |
 
 `sql/00_roles.sql` creates the roles and database, revokes `ALL` on the database from `PUBLIC`, and
@@ -392,7 +410,9 @@ login roles and the database and revokes `PUBLIC` connect rights; `sql/01_shop.s
 application role only the schema usage and DML it needs; `sql/10_monitor.sql` creates `monitor` as
 the collector, revokes `PUBLIC`, creates the views, and grants the reader only `SELECT` on those
 views. The collector's ability to see other sessions comes from membership in the predefined role
-`pg_read_all_stats`, which is narrower than `pg_monitor` and much narrower than superuser.
+`pg_monitor`, as the proposal specified: it bundles `pg_read_all_stats`, `pg_read_all_settings` and
+`pg_stat_scan_tables`, all read-only, and is much narrower than superuser. The collector functions
+are `SECURITY INVOKER`, so `pg_cron` runs them with exactly these rights.
 
 The consequence is that a compromised dashboard credential can read aggregate monitoring history
 and nothing else: no base tables, no `shop` data, no writes, no DDL. The application credential
@@ -580,14 +600,14 @@ Table 13: Approved proposal scope against the delivered build, with the reason f
 | Area | Proposed | Delivered | Reason / disclosure |
 |---|---|---|---|
 | DBMS version | PostgreSQL 16 | PostgreSQL 17.11 | 17 was the installed server; the approved 16 image was not available |
-| Provisioning | Docker Compose, one command | `initdb` disposable cluster in `./.pgdata` on port 55432 | Docker was not installed on the build machine; no admin rights |
-| Scheduler | `pg_cron` | Python scheduler loop in `scripts/collect.py` | `pg_cron` is not packaged with the Windows build; Python keeps one scheduler |
+| Provisioning | Docker Compose, one command | `initdb` disposable cluster in `./.pgdata` on port 55432 (verified); `docker-compose.yml` with a PostgreSQL 16 + `pg_cron` image added (M1) | Docker was not installed on the build machine; the Compose stack is written but **not yet built or run** |
+| Scheduler | `pg_cron` | Python loop in `scripts/collect.py` on the local cluster; `pg_cron` jobs in `sql/90_cron_jobs.sql` for the Docker image | `pg_cron` is not packaged for Windows; both schedulers call the same `monitor.capture_snapshot()` |
 | Dashboard | Provisioned Grafana | Streamlit on port 8501 | Grafana requires the same missing container stack |
-| Shop schema | 6 tables (`customers`, `products`, `orders`, `order_items`, `inventory`, `payments`) | 2 tables (`customers`, `orders`) | Two tables are sufficient to hold a row lock; time-boxed build |
-| Seed size | ~100,000 customers, ~1,000,000 orders | 1,000 customers, 10,000 orders | Fast, deterministic setup; disclosed |
-| History tables | Session, statement, table, index, lock, database | Session, lock, database counters | Statement/table/index history not implemented |
+| Shop schema | 6 tables (`customers`, `products`, `orders`, `order_items`, `inventory`, `payments`) | 6 tables; `order_items(product_id)` deliberately unindexed | Delivered (M1) |
+| Seed size | ~100,000 customers, ~1,000,000 orders | 1,000 / 10,000 deterministic rows by default; `workload/seed_data.py` loads the proposal scale on demand | Small seed keeps test databases fast; the bulk seeder has not yet been run |
+| History tables | Session, statement, table, index, lock, database | All six (`session_sample`, `statement_history`, `table_stats_history`, `index_stats_history`, `lock_wait`, `db_stat_sample`) | Statement/table/index history added in M2/M3 |
 | Analysis layer | Multiple views, materialized view, hourly rollup | Six reader views, no materialized view, no rollup | Not implemented |
-| Retention | `purge_old_snapshots(interval)` | None | Not implemented; history grows until the cluster is deleted |
+| Retention | `purge_old_snapshots(interval)` | `monitor.purge_old_snapshots(interval '7 days')`, daily `pg_cron` job in Docker | Delivered (M3); on the local cluster it must be called by hand or from a scheduler |
 | Alert rules | 6 (blocked, long-running, idle-in-transaction, saturation, cache ratio, bloat) | 3 of 6 verified live: `blocked_session`, `idle_in_transaction`, `long_active_query`; saturation, cache ratio and bloat not implemented | Three rules demonstrated end to end with captured fire/resolve evidence; the remaining three are unimplemented |
 | Overhead target | `< 5 %` `pgbench` impact | Not measured | No matched `pgbench` runs were executed |
 | Recording | Required video demonstration | Outstanding | Deferred by the team; submission incomplete without it |
@@ -629,9 +649,11 @@ being wrong after a pause.
 and no OS-level metric collection (CPU, memory, disk I/O). The proposal listed those as out of scope
 and they remain out of scope.
 
-**No retention or archival.** Nothing purges old snapshots. On a long-running instance the
-`monitor` schema would grow without bound; the correct next step is a purge function driven by an
-interval parameter, which the proposal specified and this build omits.
+**Retention, not archival.** `monitor.purge_old_snapshots()` deletes snapshots older than the
+retention window (default 7 days) together with their detail rows, but keeps any snapshot an alert
+refers to and always keeps the newest one as the next delta baseline. Purged history is gone; there
+is no archive or downsampled long-term store. `pg_cron` runs the purge daily only in the Docker
+environment; on the Windows cluster it must be invoked manually.
 
 **Local-only security posture.** `scram-sha-256` over loopback with passwords in a gitignored `.env`
 is appropriate for a disposable teaching cluster, not for production. There is no TLS, no audit
@@ -643,8 +665,9 @@ running, alerts are still recorded but nobody is told.
 
 **Dashboard scope.** The dashboard is a Streamlit application, not a provisioned Grafana dashboard,
 and its panels reflect the views that exist: timeline, lock history, current blockers, alerts. There
-are no statement, index-usage, table-health or cache-ratio panels because the underlying history
-does not exist.
+are no statement, index-usage, table-health or cache-ratio panels yet. The underlying history now
+exists (`monitor.v_statement_history`, `v_table_stats_history`, `v_index_stats_history`); the
+analysis views and panels that read it have not been built.
 
 # 9. Team Contributions
 
@@ -653,7 +676,7 @@ Table 14: Module-based contributions. Work that has not produced a concrete arti
 | Member | Implementation modules | Report contributions | Video / demonstration |
 |---|---|---|---|
 | Quan Nguyen | Disposable cluster scripts, roles and grants, `shop` seed, `monitor` schema and views, collector integration, alert integration, Streamlit dashboard, notifier integration, live evidence run, report builder | Architecture, database design, DBA implementation, evidence, verification and limitations sections; README | Planned: architecture, collector and dashboard walkthrough — pending recording |
-| Dustin Dowell | Proposed: independent reproducibility smoke test on a fresh cluster — **pending, fill in actual work products** | Proposed: environment and reproduction paragraph — **pending** | Pending — not yet recorded |
+| Dustin Dowell | **M1 environment:** `docker-compose.yml`, PostgreSQL 16 + `pg_cron` image (`docker/postgres/`), server configuration, Docker init script, `.gitattributes`; six-table `shop` schema with deterministic seed and the intentional missing index (`sql/01_shop.sql`); proposal-scale Faker seeder (`workload/seed_data.py`). **M2 monitor schema and roles:** statement, table and index history tables, `captured_at` index and reader views (`sql/11_monitor_history.sql`); `pg_monitor` membership for the collector (`sql/00_roles.sql`). **M3 collector and retention:** PL/pgSQL `monitor.capture_snapshot()` with reset-safe deltas and a lock-safe size read (`sql/12_capture_snapshot.sql`), `monitor.purge_old_snapshots()` (`sql/13_purge.sql`), `pg_cron` jobs (`sql/90_cron_jobs.sql`), `scripts/collect.py` switched to the in-database collector; `tests/test_history.py` | Environment, `shop`/`monitor` design additions, data collection and retention paragraphs (Sections 3.1, 3.2, 8.1) | Planned: introduction, environment start-up, schemas, roles, cron jobs and snapshot history — pending recording |
 | Zach Riggle | Proposed: independent privilege and alert-resolution test — **pending, fill in actual work products** | Proposed: expected-vs-actual verification write-up — **pending** | Pending — not yet recorded |
 
 The proposal assigned modules differently (Dustin: environment and collector; Quan: workload, views
@@ -668,7 +691,17 @@ disclosed here rather than presented as independent human work. The 29-test full
 `docs/results/final_pytest.txt` was re-run by the build orchestrator on freshly dropped and recreated
 databases, and the fresh-clone reproduction in `docs/results/repro_smoke.txt` was executed by the
 team's automated tooling. Both are the team testing its own build, not independent teammate work, so
-the Dustin and Zach rows above remain pending and no third party has yet reproduced the build.
+the Zach row above remains pending and no third party has yet reproduced the build.
+
+Dustin's M1–M3 modules were likewise written with AI coding assistance (Claude Code, Anthropic) under
+his direction. The SQL (`01`, `11`, `12`, `13`, `90`) was applied twice to a scratch PostgreSQL 18
+cluster and exercised as `monitor_collector`: first-sample deltas `NULL`, `seq_scan_delta` 3 after three
+unindexed lookups, normalized statement text with password-bearing text filtered, a 0.15 s snapshot
+while an `ACCESS EXCLUSIVE` lock was held (size recorded as `NULL`), a `blocked_session` alert opened
+and resolved through `capture_snapshot()`, `NULL` deltas after `pg_stat_reset()`, purge keeping
+alert evidence, and the expected `42501` denials. The Docker image, `tests/test_history.py` and
+`workload/seed_data.py` have **not yet been run** (no Docker or Python on that machine); those results
+must be captured before they are claimed.
 
 # 10. Conclusion & Future Work
 

@@ -33,9 +33,15 @@ PSQL=(psql -h "$PGHOST" -p "$PGPORT" -U "$PG_SUPERUSER" -v ON_ERROR_STOP=1 -q)
 
 "${PSQL[@]}" -d postgres -v dbname="$DB" -v app_pw="$SHOP_APP_PASSWORD" \
   -v collector_pw="$MONITOR_COLLECTOR_PASSWORD" -v reader_pw="$MONITOR_READER_PASSWORD" -f sql/00_roles.sql
-for f in sql/01_shop.sql sql/10_monitor.sql sql/20_alerts.sql sql/21_extra_rules.sql; do
-  [ -f "$f" ] && "${PSQL[@]}" -d "$DB" -f "$f" && echo "applied $f to $DB"
+# every numbered script after 00_roles.sql, in name order (01 shop, 10-13 monitor
+# schema/collector/purge, 20-21 alerts, 90 pg_cron jobs) -- the same order the
+# Docker init script (docker/postgres/initdb/10_project_init.sh) uses
+for f in sql/[0-9][0-9]_*.sql; do
+  case "$(basename "$f")" in 00_*) continue ;; esac
+  "${PSQL[@]}" -d "$DB" -f "$f" && echo "applied $f to $DB"
 done
 "${PSQL[@]}" -d "$DB" -Atc "select 'server='||current_setting('server_version'),
   'pg_stat_statements='||(select extversion from pg_extension where extname='pg_stat_statements'),
-  'customers='||(select count(*) from shop.customers), 'orders='||(select count(*) from shop.orders)"
+  'customers='||(select count(*) from shop.customers), 'orders='||(select count(*) from shop.orders),
+  'products='||(select count(*) from shop.products), 'order_items='||(select count(*) from shop.order_items),
+  'payments='||(select count(*) from shop.payments), 'inventory='||(select count(*) from shop.inventory)"

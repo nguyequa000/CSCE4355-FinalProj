@@ -67,16 +67,16 @@ workload (shop_app)  ->  PostgreSQL 17.11 statistics views  ->  Python collector
 
 | Component | Implementation | Notes |
 |---|---|---|
-| DBMS | PostgreSQL **17.11**, disposable non-admin cluster in `./.pgdata` on `127.0.0.1:55432` | Proposal specified PostgreSQL 16 in Docker; see §10 |
-| Statistics source | `pg_stat_activity`, `pg_blocking_pids()`, `pg_locks`, `pg_stat_database`, `pg_stat_statements` 1.11 | `pg_stat_statements` preloaded at cluster init |
-| Collection | `scripts/collect.py`, psycopg 3, one snapshot every 60 s | Python scheduler loop; replaces the proposed `pg_cron` job |
-| History / alerting | `monitor` schema: `snapshot`, `session_sample`, `lock_wait`, `db_stat_sample`, `alert_rule`, `alert_log`; `monitor.evaluate_alerts()` | Owned by `monitor_collector` |
+| DBMS | PostgreSQL **17.11**, disposable non-admin cluster in `./.pgdata` on `127.0.0.1:55432`; or PostgreSQL 16 + `pg_cron` via `docker-compose.yml` (§4.4) | Docker stack added in M1, not yet run; see §10 |
+| Statistics source | `pg_stat_activity`, `pg_blocking_pids()`, `pg_locks`, `pg_stat_database`, `pg_stat_statements` 1.11, `pg_stat_user_tables`/`indexes`, `pg_statio_*` | `pg_stat_statements` preloaded at cluster init |
+| Collection | `monitor.capture_snapshot()` (PL/pgSQL), called every 60 s by `scripts/collect.py` (local cluster) or `pg_cron` (Docker) | One function, two schedulers; `collect.py` falls back to its inline SQL on databases built before the function existed |
+| History / alerting | `monitor` schema: `snapshot`, `session_sample`, `lock_wait`, `db_stat_sample`, `statement_history`, `table_stats_history`, `index_stats_history`, `alert_rule`, `alert_log`; `monitor.evaluate_alerts()`; `monitor.purge_old_snapshots()` | Owned by `monitor_collector` |
 | Dashboard | `dashboard/app.py`, Streamlit on port 8501 | Connects as `monitor_reader`; reads `monitor.v_*` views only |
 | Notifier | `notifier/notify.py`, console output, 15 s poll of `alert_log` | No email/SMS |
 | Report build | `docs/report/build_report.py` (`report.md` → `.docx`) | Requires `python-docx` |
 
 Least privilege is enforced by three login roles: `shop_app` (DML on `shop` only), `monitor_collector`
-(owns `monitor`, member of `pg_read_all_stats`), `monitor_reader` (`SELECT` on `monitor.v_*` only).
+(owns `monitor`, member of `pg_monitor`), `monitor_reader` (`SELECT` on `monitor.v_*` only).
 No component connects as a superuser except the one-time setup scripts.
 
 ## 3. Prerequisites
@@ -160,16 +160,64 @@ server. Later runs only start it. Success ends with `pg_isready` reporting
 scripts/setup_db.sh
 ```
 
-This applies, in order: `sql/00_roles.sql` (roles + database), `sql/01_shop.sql` (shop schema and
-deterministic seed), `sql/10_monitor.sql` (monitor history, rule, views, grants),
-`sql/20_alerts.sql` (blocked-session rule) and `sql/21_extra_rules.sql` (idle-in-transaction and
-long-running-query rules) when present. It finishes by printing the server version, the
-`pg_stat_statements` version, and the seeded row counts. Expected on this build:
-`server=17.11`, `pg_stat_statements=1.11`, `customers=1000`, `orders=10000`
-(captured in `docs/results/t1_setup.txt`).
+This applies `sql/00_roles.sql` (roles + database) and then every other numbered script in name
+order: `01_shop.sql` (six shop tables and deterministic seed), `10_monitor.sql` (monitor history,
+rule, views, grants), `11_monitor_history.sql` (statement/table/index history and views),
+`12_capture_snapshot.sql` (collector function), `13_purge.sql` (retention function),
+`20_alerts.sql` (blocked-session rule), `21_extra_rules.sql` (idle-in-transaction and
+long-running-query rules) and `90_cron_jobs.sql` (`pg_cron` jobs; prints a NOTICE and does nothing on
+a server without `pg_cron`, such as this Windows cluster). It finishes by printing the server version,
+the `pg_stat_statements` version, and the seeded row counts. Expected with the six-table seed:
+`customers=1000`, `orders=10000`, `products=200`, `order_items=20000`, `payments=7500`,
+`inventory=200` (`docs/results/t1_setup.txt` predates the four new tables and shows only the first two).
 
 The script is safe to re-run: roles and the database are created only when missing, `sql/01_shop.sql`
-drops and rebuilds the two shop tables, and the monitor objects use `IF NOT EXISTS`.
+drops and rebuilds the shop tables, and the monitor objects use `IF NOT EXISTS` / `CREATE OR REPLACE`.
+
+### 4.4 Alternative: Docker Compose (PostgreSQL 16 + `pg_cron`)
+
+The proposal's one-command environment (M1). It needs Docker Desktop and the same `.env` as §4.1;
+`scripts/start_cluster.sh` and `scripts/setup_db.sh` are not used. **Written but not yet built or run
+by the team — capture `docker compose up` output before relying on it.**
+
+```bash
+cp .env.example .env              # replace every change-me
+docker compose up -d --build      # first start runs every sql/[0-9][0-9]_*.sql
+docker compose logs postgres | grep project-init
+```
+
+- The server listens on `127.0.0.1:${PGPORT}` (55432), so the collector, dashboard, notifier, tests and
+  workload scripts connect exactly as they do to the local cluster. Stop the local cluster first if
+  both would use the same port.
+- `pg_cron` runs `monitor.capture_snapshot()` (and therefore the alert rules) every minute as
+  `monitor_collector`, purges snapshots older than 7 days daily, and trims its own run log. **Do not
+  also run `scripts/collect.py`** against the same database. Check the jobs with
+  `SELECT jobname, schedule, username FROM cron.job;`.
+- Extra databases (for the pytest suite) are built inside the container:
+  `docker compose exec postgres /docker-entrypoint-initdb.d/10_project_init.sh shopdb_t2`.
+- Optional Grafana: `docker compose --profile grafana up -d` (port 3000; provisioning files belong in
+  `grafana/`).
+- Reset: `docker compose down -v` deletes the `pgdata` volume and all history.
+
+### 4.5 Proposal-scale data (optional)
+
+```bash
+uv pip install --python .venv/Scripts/python.exe faker   # optional, for realistic names
+.venv/Scripts/python.exe workload/seed_data.py --yes      # ~100k customers / ~1M orders, a few minutes
+```
+
+This truncates and reloads every `shop` table in `PGDATABASE` (it refuses `*_t2`-style test
+databases). The intentionally missing `shop.order_items(product_id)` index stays missing.
+
+### 4.6 Retention
+
+`monitor.purge_old_snapshots(interval '7 days')` deletes snapshots older than the window with all
+their detail rows, keeping snapshots referenced by `monitor.alert_log` and the newest snapshot. In
+Docker `pg_cron` runs it daily; on the local cluster run it when needed:
+
+```bash
+psql -h 127.0.0.1 -p 55432 -U monitor_collector -d shopdb -c "SELECT monitor.purge_old_snapshots();"
+```
 
 > `setup_db.sh` must run **after** the cluster is accepting connections. It connects with `psql` as
 > the superuser, so `PG_SUPERUSER_PASSWORD` in `.env` must match the password used at `initdb` time.
@@ -258,6 +306,14 @@ rule). The full suite on freshly dropped and recreated test databases is `29 pas
 `docs/results/t5_extra_rules_pytest.txt`; `9 passed in 0.68s` (`docs/results/t2_pytest.txt`, capture
 + privileges) and `9 passed in 3.28s` (`docs/results/t3_pytest.txt`, alert).
 
+`tests/test_history.py` (7 tests, M1–M3, runs on `shopdb_t2`) adds: six shop tables with the
+intentional missing index and consistent order totals, `pg_monitor` membership, every history table
+filled by one `capture_snapshot()` call, `NULL`-then-non-negative table/index/statement deltas
+(including a `seq_scan_delta` of at least 3 after three unindexed lookups), normalized statement text
+with password-bearing text excluded, reader access to the new views only, and purge retention. Those
+recorded results predate it: **rebuild `shopdb_t2` with `scripts/setup_db.sh shopdb_t2` and re-run the
+suite before quoting a new total.**
+
 ## 7. Evidence index
 
 Evidence lives in `docs/results/`; `docs/results/live/` holds the artifacts of the 2026-11-22
@@ -294,24 +350,35 @@ Final_Project/
 ├── README.md                     this file
 ├── .env.example                  template for local credentials (copy to .env)
 ├── .gitignore                    excludes .env, .pgdata/, .venv/, caches
+├── .gitattributes                LF endings for shell scripts and docker/ (Windows checkouts)
+├── docker-compose.yml            PostgreSQL 16 + pg_cron (and optional Grafana) — M1
+├── docker/postgres/
+│   ├── Dockerfile                postgres:16 + postgresql-16-cron
+│   ├── postgresql.conf           preload pg_stat_statements/pg_cron, track_io_timing, cron settings
+│   └── initdb/10_project_init.sh applies sql/ in order on first start (or for an extra database)
 ├── scripts/
 │   ├── start_cluster.sh          initdb (first run) + start/stop disposable PG17 cluster
 │   ├── setup_db.sh               roles, database, shop seed, monitor schema, summary
-│   ├── collect.py                60 s snapshot collector + alert evaluation
+│   ├── collect.py                60 s scheduler: calls monitor.capture_snapshot() (+ alerts)
 │   └── dbconf.py                 .env-driven psycopg 3 connection helper
 ├── sql/
 │   ├── 00_roles.sql              shop_app / monitor_collector / monitor_reader, database, grants
-│   ├── 01_shop.sql               shop.customers, shop.orders, orders_customer_id_idx, seed
+│   ├── 01_shop.sql               six shop tables, deterministic seed, intentional missing index
 │   ├── 10_monitor.sql            history tables, alert_rule, alert_log, views, reader grants
+│   ├── 11_monitor_history.sql    statement/table/index history + reader views — M2
+│   ├── 12_capture_snapshot.sql   monitor.capture_snapshot() collector — M3
+│   ├── 13_purge.sql              monitor.purge_old_snapshots(interval) — M3
 │   ├── 20_alerts.sql             monitor.evaluate_alerts() — blocked_session rule
-│   └── 21_extra_rules.sql        idle_in_transaction and long_active_query rules
+│   ├── 21_extra_rules.sql        idle_in_transaction and long_active_query rules
+│   └── 90_cron_jobs.sql          pg_cron schedule (no-op without pg_cron) — M3
 ├── workload/
-│   └── lock_demo.py              two-session row-lock contention generator
+│   ├── lock_demo.py              two-session row-lock contention generator
+│   └── seed_data.py              proposal-scale synthetic shop data (Faker, COPY) — M1
 ├── notifier/
 │   └── notify.py                 console notifier for alert_log
 ├── dashboard/
 │   └── app.py                    Streamlit dashboard (monitor_reader)
-├── tests/                        pytest suite (29 tests)
+├── tests/                        pytest suite (29 recorded tests + test_history.py, 7, not yet run)
 ├── docs/
 │   ├── results/                  captured evidence (see §7)
 │   │   ├── live/                 collector/notifier/demo logs, alert SQL, dashboard renders
@@ -354,11 +421,11 @@ Disclosed deviations from the approved proposal (all of them also appear in repo
 
 | Area | Proposed | Delivered |
 |---|---|---|
-| DBMS / provisioning | PostgreSQL 16 in Docker Compose | PostgreSQL **17.11**, disposable non-admin local cluster (Docker not installed) |
-| Scheduler | `pg_cron` in-database job | Python scheduler loop in `scripts/collect.py` |
-| Dashboard | Provisioned Grafana | Streamlit app on port 8501 |
-| Shop schema | 6 tables, ~100k customers / ~1M orders | 2 tables (`customers`, `orders`), **1,000 / 10,000** deterministic rows |
-| History | Session, statement, table, index, lock and database history; hourly rollup; retention | Session, lock-edge and database-counter history; no statement/table/index history, no rollup, no purge job |
+| DBMS / provisioning | PostgreSQL 16 in Docker Compose | PostgreSQL **17.11** local cluster (verified); PostgreSQL 16 + `pg_cron` Compose stack added (M1, **not yet run**) |
+| Scheduler | `pg_cron` in-database job | `pg_cron` jobs in Docker (`sql/90_cron_jobs.sql`); Python loop on the Windows cluster; both call `monitor.capture_snapshot()` |
+| Dashboard | Provisioned Grafana | Streamlit app on port 8501 (Grafana service available under a Compose profile, unprovisioned) |
+| Shop schema | 6 tables, ~100k customers / ~1M orders | 6 tables, **1,000 / 10,000** deterministic rows by default; `workload/seed_data.py` for proposal scale (not yet run) |
+| History | Session, statement, table, index, lock and database history; hourly rollup; retention | All six histories and a 7-day purge function (M2/M3); no hourly rollup |
 | Alert rules | 6 | 3 of 6 verified live (`blocked_session`, `idle_in_transaction`, `long_active_query`); saturation, cache ratio and bloat not implemented |
 | Overhead | `< 5 %` pgbench impact | **Not measured** |
 | Recording | Required video | **Outstanding** |
@@ -375,9 +442,13 @@ Further limitations:
   wait-start window would be attributed to the existing alert.
 - When a backend waits on several blockers the alert names the lowest blocker PID and the longest
   observed wait; the other edges stay in `monitor.lock_wait` but not in the alert row.
-- `pg_stat_statements` is available and preloaded, but no statement-level history is stored.
-- Deltas in `monitor.db_stat_sample` are `NULL` on the first sample and after `pg_stat_reset`; they
-  are never negative, and no rate is claimed for those intervals.
+- Statement history keeps the top 500 statements by total execution time per snapshot; a statement
+  that drops out of the top 500 and returns gets a `NULL` delta for that interval.
+- Deltas in every history table are `NULL` on the first sample, after `pg_stat_reset` /
+  `pg_stat_statements_reset`, and whenever a counter decreased; they are never negative, and no rate
+  is claimed for those intervals.
+- Table and index sizes are recorded as `NULL` for a snapshot in which that relation has an
+  `ACCESS EXCLUSIVE` lock held or queued, so the collector never waits behind DDL it should report.
 - The cluster is single-node, local-only, without TLS, replication or backups; it is a disposable
   teaching environment, not a production deployment. Deleting `./.pgdata` destroys all history.
 - Alerting is console-only; there is no email, paging or deduplication across restarts beyond the
@@ -427,5 +498,10 @@ rebuilds the schema and seed. `.env` is intentionally kept so the same passwords
 - No credentials are committed: `.env` is gitignored, `.env.example` contains only `change-me`.
 - SQL scripts take passwords as `psql` variables; no password literal appears in `sql/`.
 - `monitor.session_sample` stores only a 60-character statement excerpt and no credentials.
-- `pg_stat_activity` access is granted through `pg_read_all_stats` to the collector only.
+- `pg_stat_activity` access is granted through `pg_monitor` (which includes `pg_read_all_stats`) to
+  the collector only.
+- `monitor.statement_history` keeps only `pg_stat_statements`' normalized text (`$1` placeholders),
+  clipped to 500 characters, and never stores a statement whose text contains `password`.
+- The Docker port is bound to `127.0.0.1` only, and `docker-compose.yml` passes the container just
+  the variables it needs from `.env`; no credential appears in the Compose file or the image.
 - The cluster listens on `127.0.0.1` only, with `scram-sha-256` authentication.
