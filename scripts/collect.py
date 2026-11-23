@@ -6,16 +6,25 @@ Modes
     python scripts/collect.py --once [--db NAME]
     python scripts/collect.py --interval 60 [--count N] [--db NAME]
 
-This is the proposal's Python scheduler fallback (replacing pg_cron).  The
+This is the proposal's Python scheduler fallback, for servers without pg_cron
+(the Windows local cluster).  In the Docker environment pg_cron calls
+monitor.capture_snapshot() every minute instead -- do not run both.  The
 loop is aligned to a fixed cadence: tick N happens at start + N*interval, so
 collection runtime does not accumulate into drift.
 
-Every snapshot is ONE transaction:
-  1. monitor.snapshot            (captured_at = clock_timestamp())
-  2. monitor.session_sample      pg_stat_activity, client backends of this DB
-  3. monitor.lock_wait           one row per (waiter, blocker) edge
-  4. monitor.db_stat_sample      pg_stat_database counters + deltas
-  5. monitor.evaluate_alerts()   only if that function exists (Lane B)
+Every snapshot is ONE transaction.  When monitor.capture_snapshot() exists
+(sql/12_capture_snapshot.sql, M3) the collector simply calls it, so pg_cron and
+this script produce identical history:
+  1. monitor.snapshot             (captured_at = clock_timestamp())
+  2. monitor.session_sample       pg_stat_activity, client backends of this DB
+  3. monitor.lock_wait            one row per (waiter, blocker) edge
+  4. monitor.db_stat_sample       pg_stat_database counters + deltas
+  5. monitor.statement_history    pg_stat_statements         (function only)
+  6. monitor.table_stats_history  pg_stat_user_tables        (function only)
+  7. monitor.index_stats_history  pg_stat_user_indexes       (function only)
+  8. monitor.evaluate_alerts()    only if that function exists
+On a database built before that function existed, steps 1-4 and 8 run from the
+inline SQL below.
 
 No credentials are stored.  Query text is truncated to 60 characters by the
 schema contract; the collector never samples literal values itself.
@@ -132,6 +141,16 @@ EVALUATE_ALERTS_EXISTS = """
 SELECT to_regprocedure('monitor.evaluate_alerts(bigint)') IS NOT NULL
 """
 
+CAPTURE_FUNCTION_EXISTS = """
+SELECT to_regprocedure('monitor.capture_snapshot()') IS NOT NULL
+"""
+
+CAPTURE_SNAPSHOT = """
+SELECT snapshot_id, captured_at, sessions, lock_edges, statements, tables,
+       indexes, alerts_opened, alerts_resolved
+FROM monitor.capture_snapshot()
+"""
+
 
 class SnapshotError(RuntimeError):
     """A snapshot could not be captured (transaction already rolled back)."""
@@ -146,43 +165,16 @@ def take_snapshot(conn: psycopg.Connection, log=print) -> dict:
 
     Returns a summary dict and prints exactly one line to stdout:
         snapshot_id=.. captured_at=.. sessions=.. lock_edges=..
-        alerts_opened=.. alerts_resolved=..
+        alerts_opened=.. alerts_resolved=.. evaluate_alerts=..
+        [statements=.. tables=.. indexes=..]   (capture_snapshot() path)
     Raises SnapshotError on failure (transaction rolled back, connection usable).
     """
     conn.rollback()  # discard anything left over from a previous failed attempt
     try:
-        snap = conn.execute(
-            "INSERT INTO monitor.snapshot (captured_at) "
-            "VALUES (clock_timestamp()) RETURNING snapshot_id, captured_at"
-        ).fetchone()
-        snapshot_id, captured_at = snap
-
-        conn.execute(INSERT_SESSIONS, {"sid": snapshot_id})
-        sessions = conn.execute(
-            "SELECT count(*) FROM monitor.session_sample WHERE snapshot_id = %s",
-            (snapshot_id,),
-        ).fetchone()[0]
-
-        conn.execute(INSERT_LOCK_WAITS, {"sid": snapshot_id})
-        edges = conn.execute(
-            "SELECT count(*) FROM monitor.lock_wait WHERE snapshot_id = %s",
-            (snapshot_id,),
-        ).fetchone()[0]
-
-        conn.execute(INSERT_DB_STAT, {"sid": snapshot_id})
-
-        has_alerts = conn.execute(EVALUATE_ALERTS_EXISTS).fetchone()[0]
-        opened = resolved = None
-        if has_alerts:
-            result = conn.execute(
-                "SELECT opened, resolved FROM monitor.evaluate_alerts(%s)",
-                (snapshot_id,),
-            ).fetchone()
-            if result is not None:
-                opened, resolved = result
-            else:
-                opened = resolved = 0
-
+        if conn.execute(CAPTURE_FUNCTION_EXISTS).fetchone()[0]:
+            summary = _capture_in_database(conn)
+        else:
+            summary = _capture_inline(conn)
         conn.commit()
     except Exception as exc:  # noqa: BLE001 - one bad tick must not kill the loop
         try:
@@ -191,7 +183,59 @@ def take_snapshot(conn: psycopg.Connection, log=print) -> dict:
             pass
         raise SnapshotError(str(exc)) from exc
 
-    summary = {
+    log(format_line(summary))
+    return summary
+
+
+def _capture_in_database(conn: psycopg.Connection) -> dict:
+    """One snapshot via monitor.capture_snapshot() (caller commits)."""
+    (snapshot_id, captured_at, sessions, edges, statements, tables, indexes,
+     opened, resolved) = conn.execute(CAPTURE_SNAPSHOT).fetchone()
+    return {
+        "snapshot_id": snapshot_id,
+        "captured_at": captured_at,
+        "sessions": sessions,
+        "lock_edges": edges,
+        "alerts_opened": opened,
+        "alerts_resolved": resolved,
+        "evaluate_alerts": conn.execute(EVALUATE_ALERTS_EXISTS).fetchone()[0],
+        "statements": statements,
+        "tables": tables,
+        "indexes": indexes,
+    }
+
+
+def _capture_inline(conn: psycopg.Connection) -> dict:
+    """One snapshot from the inline SQL above (pre-capture_snapshot databases)."""
+    snapshot_id, captured_at = conn.execute(
+        "INSERT INTO monitor.snapshot (captured_at) "
+        "VALUES (clock_timestamp()) RETURNING snapshot_id, captured_at"
+    ).fetchone()
+
+    conn.execute(INSERT_SESSIONS, {"sid": snapshot_id})
+    sessions = conn.execute(
+        "SELECT count(*) FROM monitor.session_sample WHERE snapshot_id = %s",
+        (snapshot_id,),
+    ).fetchone()[0]
+
+    conn.execute(INSERT_LOCK_WAITS, {"sid": snapshot_id})
+    edges = conn.execute(
+        "SELECT count(*) FROM monitor.lock_wait WHERE snapshot_id = %s",
+        (snapshot_id,),
+    ).fetchone()[0]
+
+    conn.execute(INSERT_DB_STAT, {"sid": snapshot_id})
+
+    has_alerts = conn.execute(EVALUATE_ALERTS_EXISTS).fetchone()[0]
+    opened = resolved = None
+    if has_alerts:
+        result = conn.execute(
+            "SELECT opened, resolved FROM monitor.evaluate_alerts(%s)",
+            (snapshot_id,),
+        ).fetchone()
+        opened, resolved = result if result is not None else (0, 0)
+
+    return {
         "snapshot_id": snapshot_id,
         "captured_at": captured_at,
         "sessions": sessions,
@@ -200,8 +244,6 @@ def take_snapshot(conn: psycopg.Connection, log=print) -> dict:
         "alerts_resolved": resolved,
         "evaluate_alerts": has_alerts,
     }
-    log(format_line(summary))
-    return summary
 
 
 def format_line(s: dict) -> str:
@@ -209,12 +251,16 @@ def format_line(s: dict) -> str:
     captured_txt = captured.isoformat() if isinstance(captured, datetime) else str(captured)
     opened = "na" if s["alerts_opened"] is None else s["alerts_opened"]
     resolved = "na" if s["alerts_resolved"] is None else s["alerts_resolved"]
-    return (
+    line = (
         f"snapshot_id={s['snapshot_id']} captured_at={captured_txt} "
         f"sessions={s['sessions']} lock_edges={s['lock_edges']} "
         f"alerts_opened={opened} alerts_resolved={resolved} "
         f"evaluate_alerts={'present' if s['evaluate_alerts'] else 'absent'}"
     )
+    # appended (not interleaved) so existing log parsers keep matching
+    if "statements" in s:
+        line += f" statements={s['statements']} tables={s['tables']} indexes={s['indexes']}"
+    return line
 
 
 # ---------------------------------------------------------------------------
