@@ -16,7 +16,7 @@ snapshot_id=6 captured_at=2026-11-22T21:56:35.196671-06:00 sessions=0 lock_edges
 mode=idle pid=22992 hold=100s
 pid=22992 state=idle in transaction start=2026-11-23T03:54:04.593+00:00
 pid=22992 end=2026-11-23T03:55:44.590+00:00 ok=true
-event_log=C:\Users<USER>\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.worktrees\subagent-sa-1-3be78978\docs\results\t5_session_demo.jsonl
+event_log=<WORKTREE-REDACTED>\docs\results\t5_session_demo.jsonl
 
 === long_active_query run ===
 demo launch: 2026-11-22T21:56:44-06:00
@@ -36,4 +36,4 @@ snapshot_id=12 captured_at=2026-11-22T21:59:14.942314-06:00 sessions=0 lock_edge
 mode=long pid=31668 hold=100s
 pid=31668 state=active query=pg_sleep start=2026-11-23T03:56:44.396+00:00
 pid=31668 end=2026-11-23T03:58:24.398+00:00 ok=true
-event_log=C:\Users<USER>\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.worktrees\subagent-sa-1-3be78978\docs\results\t5_session_demo.jsonl
+event_log=<WORKTREE-REDACTED>\docs\results\t5_session_demo.jsonl

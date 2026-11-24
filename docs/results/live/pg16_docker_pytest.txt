@@ -1,0 +1,67 @@
+# Full pytest suite against the PostgreSQL 16.16 Docker stack
+# Captured 2026-11-23 22:15 CST (2026-11-24 04:15 UTC).
+# Database: shopdb_t2, built inside the pg-monitoring-postgres-1 container with
+#   /docker-entrypoint-initdb.d/10_project_init.sh shopdb_t2
+# pg_stat_statements was reset before the run so setup DDL could not pollute the
+# normalized-statement assertion. No application data or demo history was touched.
+# Command: TEST_DB=shopdb_t2 ../.venv/Scripts/python.exe -m pytest tests -v
+
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.2.0, pluggy-1.7.0 -- C:\Users\johnq\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\johnq\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\CSCE4355-FinalProj
+plugins: anyio-4.16.0
+collecting ... collected 50 items
+
+tests/test_alert.py::test_below_threshold_does_not_alert PASSED          [  2%]
+tests/test_alert.py::test_at_threshold_opens_alert_with_correct_times PASSED [  4%]
+tests/test_alert.py::test_two_blockers_picks_lowest_blocker_pid PASSED   [  6%]
+tests/test_alert.py::test_repeat_snapshot_keeps_single_open_alert_and_updates_observed PASSED [  8%]
+tests/test_alert.py::test_clean_snapshot_resolves_open_alert_once PASSED [ 10%]
+tests/test_alert.py::test_disabled_rule_does_nothing PASSED              [ 12%]
+tests/test_alert.py::test_pid_reuse_after_previous_observation_starts_new_alert PASSED [ 14%]
+tests/test_alert.py::test_live_lock_contention_opens_then_resolves PASSED [ 16%]
+tests/test_alert.py::test_notifier_prints_each_alert_once PASSED         [ 18%]
+tests/test_capture.py::test_unattended_snapshots_have_distinct_increasing_timestamps PASSED [ 20%]
+tests/test_capture.py::test_lock_wait_edge_captured_then_gone_but_history_kept PASSED [ 22%]
+tests/test_capture.py::test_db_stat_deltas_null_first_then_non_negative PASSED [ 24%]
+tests/test_extra_rules.py::test_idle_below_threshold_does_not_alert PASSED [ 26%]
+tests/test_extra_rules.py::test_idle_at_threshold_opens_warning_alert PASSED [ 28%]
+tests/test_extra_rules.py::test_long_active_query_below_threshold_does_not_alert PASSED [ 30%]
+tests/test_extra_rules.py::test_long_active_query_at_threshold_opens_and_ignores_lock_waits PASSED [ 32%]
+tests/test_extra_rules.py::test_idle_persists_single_open_alert_and_updates_observed PASSED [ 34%]
+tests/test_extra_rules.py::test_long_active_query_persists_without_duplicate PASSED [ 36%]
+tests/test_extra_rules.py::test_both_rules_resolve_on_first_clean_snapshot PASSED [ 38%]
+tests/test_extra_rules.py::test_collector_own_backend_is_excluded PASSED [ 40%]
+tests/test_extra_rules.py::test_new_episode_same_pid_reopens_alert PASSED [ 42%]
+tests/test_extra_rules.py::test_live_session_opens_then_resolves[idle-idle_in_transaction-idle in transaction-session_demo_idle] PASSED [ 44%]
+tests/test_extra_rules.py::test_live_session_opens_then_resolves[long-long_active_query-active-session_demo_long] PASSED [ 46%]
+tests/test_history.py::test_shop_has_six_tables_and_the_intentional_missing_index PASSED [ 48%]
+tests/test_history.py::test_collector_is_pg_monitor_member_and_not_superuser PASSED [ 50%]
+tests/test_history.py::test_capture_snapshot_fills_every_history_table PASSED [ 52%]
+tests/test_history.py::test_table_deltas_null_first_then_count_new_seq_scans PASSED [ 54%]
+tests/test_history.py::test_statement_history_keeps_normalized_text_and_no_password_text PASSED [ 56%]
+tests/test_history.py::test_reader_sees_new_views_but_not_history_tables PASSED [ 58%]
+tests/test_history.py::test_purge_keeps_recent_newest_and_alert_evidence PASSED [ 60%]
+tests/test_more_rules.py::test_table_stat_sample_contract_and_rule_defaults PASSED [ 62%]
+tests/test_more_rules.py::test_connection_saturation_below_threshold_no_alert PASSED [ 64%]
+tests/test_more_rules.py::test_connection_saturation_at_threshold_opens_warning PASSED [ 66%]
+tests/test_more_rules.py::test_connection_saturation_persists_without_duplicate_then_resolves PASSED [ 68%]
+tests/test_more_rules.py::test_cache_hit_ratio_below_threshold_no_alert PASSED [ 70%]
+tests/test_more_rules.py::test_cache_hit_ratio_exactly_at_threshold_no_alert PASSED [ 72%]
+tests/test_more_rules.py::test_cache_hit_ratio_insufficient_window_is_unknown PASSED [ 74%]
+tests/test_more_rules.py::test_cache_hit_ratio_opens_persists_and_resolves PASSED [ 76%]
+tests/test_more_rules.py::test_cache_hit_ratio_insufficient_window_does_not_resolve PASSED [ 78%]
+tests/test_more_rules.py::test_dead_tuple_risk_below_dead_count_no_alert PASSED [ 80%]
+tests/test_more_rules.py::test_dead_tuple_risk_below_ratio_no_alert PASSED [ 82%]
+tests/test_more_rules.py::test_dead_tuple_risk_at_threshold_opens_per_table PASSED [ 84%]
+tests/test_more_rules.py::test_dead_tuple_risk_persists_without_duplicate_then_resolves PASSED [ 86%]
+tests/test_more_rules.py::test_dead_tuple_risk_empty_table_sample_is_unknown_not_clean PASSED [ 88%]
+tests/test_privileges.py::test_reader_can_select_every_monitor_view PASSED [ 90%]
+tests/test_privileges.py::test_reader_cannot_insert_alert_log PASSED     [ 92%]
+tests/test_privileges.py::test_reader_cannot_select_snapshot_base_table PASSED [ 94%]
+tests/test_privileges.py::test_reader_cannot_select_shop_customers PASSED [ 96%]
+tests/test_privileges.py::test_shop_app_cannot_select_monitor_alerts_view PASSED [ 98%]
+tests/test_privileges.py::test_shop_app_cannot_select_monitor_snapshot PASSED [100%]
+
+============================= 50 passed in 23.66s =============================

@@ -1,5 +1,5 @@
 T4 dashboard boot + render evidence — 2026-11-22 21:32:16 CST
-worktree: <HOME>/Documents/test/School/CSCE4355/Assignment_Instruction/Final_Project/.worktrees/subagent-sa-2-831466a5
+worktree: <WORKTREE-REDACTED>
 python:   ../../.venv/Scripts/python.exe (Python 3.12.10)
 streamlit: 1.67.0
 
@@ -43,7 +43,7 @@ banner: 'STALE DATA: latest snapshot #6 captured 2026-11-22 21:30:44 CST is 110s
 log: docs/results/t4_stale_check.log
 
 == empty database path (shopdb, monitor tables empty) ==
-  wrote C:\Users<USER>\AppData\Local\hermes\cache\scratch\t4_empty.html (3836 bytes) from db=shopdb role=monitor_reader snapshots=0
+  wrote <SCRATCH>\t4_empty.html (3836 bytes) from db=shopdb role=monitor_reader snapshots=0
 renders 'No snapshots yet — start the collector.', 'No blocking at latest snapshot.', 'No open alerts.' without error
 
 == screenshot ==

@@ -6,7 +6,7 @@ self-tested by the team's tooling, not by a human teammate.
 
 Source repo : <HOME>/Documents/test/School/CSCE4355/Assignment_Instruction/Final_Project
               git master, HEAD 8a0b226 (cloned, not copied)
-Clone       : <HOME>/AppData/Local/hermes/cache/scratch/csce4355-repro
+Clone       : <SCRATCH>/csce4355-repro
               (fresh `git clone`; no .env, no .pgdata, no .venv present)
 Host        : Windows 11, Git Bash (MSYS), PostgreSQL 17.11 binaries at
               C:/Program Files/PostgreSQL/17/bin
@@ -30,7 +30,7 @@ Verdict     : PASS end to end (cluster, schema, 18/18 tests, alert fire +
 --------------------------------------------------------------------------------
 0. ENVIRONMENT (README §3)
 --------------------------------------------------------------------------------
-$ cd <HOME>/AppData/Local/hermes/cache/scratch
+$ cd <SCRATCH>
 $ git clone <HOME>/Documents/test/School/CSCE4355/Assignment_Instruction/Final_Project csce4355-repro
 Cloning into 'csce4355-repro'...
 done.
@@ -96,7 +96,7 @@ TMPDIR=/tmp and MSYS path translation is disabled, so mktemp returns an MSYS
 
 Workaround that worked (no file in the repo changed):
 
-$ export TMPDIR='<HOME>/AppData/Local/hermes/cache/scratch/tmppw'
+$ export TMPDIR='<SCRATCH>/tmppw'
 $ scripts/start_cluster.sh
 waiting for server to start.... done
 server started
@@ -199,7 +199,7 @@ waiter_pid=23896 injection=2026-11-23T03:58:10.199+00:00 (blocked by blocker_pid
 holding for 60s ...
 release=2026-11-23T03:59:10.197+00:00
 waiter_finished=2026-11-23T03:59:10.199+00:00 ok=true
-event_log=C:\Users<USER>\AppData\Local\hermes\cache\scratch\csce4355-repro\docs\results\lock_demo_events.jsonl
+event_log=<SCRATCH>\csce4355-repro\docs\results\lock_demo_events.jsonl
 
 notifier output:
 [ALERT FIRED] id=1 rule=blocked_session severity=critical blocked_pid=23896 blocker_pid=19700 fired_at=2026-11-22T21:58:42.391367-06:00 observed=32.2s

@@ -1,8 +1,8 @@
 LANE D2 — dashboard history views + rule-aware alerts — verification
 =====================================================================
 captured : 2026-11-22 22:57 CST (America/Chicago)
-branch   : hermes-subagent/subagent-sa-3-7c15a30c (base d0ca12c)
-worktree : <HOME>/Documents/test/School/CSCE4355/Assignment_Instruction/Final_Project/.worktrees/subagent-sa-3-7c15a30c
+branch   : <BRANCH-REDACTED> (base d0ca12c)
+worktree : <WORKTREE-REDACTED>
 python   : ../../.venv/Scripts/python.exe — Python 3.12.10, streamlit 1.67.0, pandas 3.1.1
 cluster  : 127.0.0.1:55432 — PostgreSQL 17.11
 databases: shopdb_d2  — full fixtures (contract base tables + stand-in views + extra-rule alerts)

@@ -1,0 +1,60 @@
+Fresh-database full test suite — PostgreSQL 16, pg_stat_statements.track=all, no reset
+=========================================================================================
+
+Date: 2026-11-23 22:41 CST (2026-11-24 04:41 UTC)
+Source under test: this repository (scratch copy), tests/test_history.py with the
+statement probe scoped to the exact SELECT executed by the test.
+
+Environment
+-----------
+- Windows 11 host; Docker Engine 29.1.3 in WSL Ubuntu-24.04; Compose 2.40.3
+- Image csce4355/postgres-monitor:16: PostgreSQL 16.16, pg_stat_statements 1.10,
+  pg_cron 1.6, pg_stat_statements.track = all
+- Isolated Compose project: pg16fresh-sa0-223927
+- Loopback-only host port 56533 (live pg-monitoring stack on 55432 untouched)
+- New named volume pg16fresh-sa0-223927_pgdata; no reuse of any previous stack
+
+Fresh databases
+---------------
+Created on the new volume from docker/postgres/initdb/10_project_init.sh:
+  shopdb_t2 (capture/privileges), shopdb_t3 (alert), shopdb_t5 (extra rules),
+  shopdb_h1 (history), shopdb_r2 (more rules)
+
+No statistics reset
+--------------------
+pg_stat_statements_info.stats_reset = 2026-11-24T04:39:49.579056+00:00
+server postmaster start            = 2026-11-24T04:39:51.060766+00:00
+The pytest run started at 22:41:08 CST = 04:41:08 UTC, after both timestamps.
+No pg_stat_statements_reset() was issued at any point in this verification.
+
+Command
+-------
+  env -u PGPASSWORD -u PG_SUPERUSER -u PGHOST -u PGPORT -u PGDATABASE \
+      -u PG_SUPERUSER_PASSWORD -u SHOP_APP_PASSWORD \
+      -u MONITOR_COLLECTOR_PASSWORD -u MONITOR_READER_PASSWORD -u TEST_DB \
+      <project-venv>/Scripts/python.exe -m pytest tests -v
+
+Result (50 collected, 50 passed, exit code 0)
+---------------------------------------------
+  tests/test_history.py::test_statement_history_keeps_normalized_text_and_no_password_text PASSED [ 56%]
+  ============================= 50 passed in 24.43s =============================
+
+Scope proof for the history probe (same fresh shopdb_h1, one new snapshot)
+--------------------------------------------------------------------------
+  stored_texts=147 broad_matches=3 exact_select_matches=1
+  broad-only entries (unrelated setup DDL/DML):
+   - CREATE TABLE shop.order_items ( order_id integer NOT NULL REFERENCES shop.orders(order_id) ON DELETE
+   - INSERT INTO shop.order_items (order_id, line_no, product_id, quantity, unit_price) SELECT si.order_i
+  exact SELECT entry:
+   + SELECT count(*) FROM shop.order_items WHERE product_id = $1
+
+The old broad predicate ("shop.order_items" AND "product_id") matched both setup
+statements as well as the query under test; the updated probe matches only the
+exact SELECT, so normalization ($1, no literal "11") and the password-exclusion
+assertion are still enforced.
+
+Cleanup
+-------
+Scratch containers, network and volume removed after the run; the live
+pg-monitoring stack was not modified. Raw pytest output, init log and this
+counts probe are retained under the local verification directory for audit.

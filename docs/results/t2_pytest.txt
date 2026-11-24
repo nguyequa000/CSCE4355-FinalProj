@@ -1,7 +1,7 @@
 ============================= test session starts =============================
 platform win32 -- Python 3.12.10, pytest-9.2.0, pluggy-1.7.0 -- C:\Users<USER>\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.venv\Scripts\python.exe
 cachedir: .pytest_cache
-rootdir: C:\Users<USER>\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.worktrees\subagent-sa-0-f1949463
+rootdir: <WORKTREE-REDACTED>
 plugins: anyio-4.16.0
 collecting ... collected 9 items
 
