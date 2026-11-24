@@ -181,7 +181,12 @@ def test_statement_history_keeps_normalized_text_and_no_password_text(
             (sid,),
         ).fetchall()
     ]
-    probe = [t for t in texts if "shop.order_items" in t and "product_id" in t]
+    # Scope the probe to the exact SELECT executed above.  Schema load and seed
+    # DDL/DML also mention shop.order_items/product_id, and with
+    # pg_stat_statements.track = all those unnormalized texts are captured too;
+    # a broad substring probe would mistake them for the query under test.
+    select_prefix = "SELECT count(*) FROM shop.order_items WHERE product_id ="
+    probe = [t for t in texts if t.lstrip().startswith(select_prefix)]
     assert probe, "the order_items lookup is missing from statement_history"
     assert all("$1" in t and "11" not in t for t in probe), f"not normalized: {probe}"
     assert not [t for t in texts if "password" in t.lower()], "password text was stored"

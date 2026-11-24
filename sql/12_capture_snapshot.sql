@@ -58,6 +58,8 @@ DECLARE
     v_indexes     integer := 0;
     v_opened      integer;
     v_resolved    integer;
+    v_step_opened integer;
+    v_step_resolved integer;
     v_prev        bigint;
     v_db_reset    timestamptz;
     v_same_epoch  boolean;
@@ -284,12 +286,38 @@ BEGIN
     ) f;
     GET DIAGNOSTICS v_indexes = ROW_COUNT;
 
-    -- 8. alert rules (Zach's module), same transaction as the rows they read ---
+    -- 7b. optional history panels (sql/12_history.sql).  collect_extra() fills
+    --     monitor.table_stat_sample and monitor.statement_sample behind
+    --     v_table_stats / v_statement_stats; it is idempotent per snapshot, so
+    --     calling it here and from scripts/collect.py never duplicates rows.
+    IF to_regprocedure('monitor.collect_extra(bigint)') IS NOT NULL THEN
+        PERFORM monitor.collect_extra(v_sid);
+    END IF;
+
+    -- 8. alert rules, same transaction as the rows they read ------------------
+    v_opened := 0;
+    v_resolved := 0;
     IF to_regprocedure('monitor.evaluate_alerts(bigint)') IS NOT NULL THEN
         SELECT e.opened, e.resolved INTO v_opened, v_resolved
           FROM monitor.evaluate_alerts(v_sid) e;
         v_opened := COALESCE(v_opened, 0);
         v_resolved := COALESCE(v_resolved, 0);
+    END IF;
+
+    -- Extra rule sets live in sql/21_extra_rules.sql and sql/22_more_rules.sql.
+    -- Guarded so a database built from only the original files still works.
+    IF to_regprocedure('monitor.evaluate_extra_rules(bigint)') IS NOT NULL THEN
+        SELECT e.opened, e.resolved INTO v_step_opened, v_step_resolved
+          FROM monitor.evaluate_extra_rules(v_sid) e;
+        v_opened := v_opened + COALESCE(v_step_opened, 0);
+        v_resolved := v_resolved + COALESCE(v_step_resolved, 0);
+    END IF;
+
+    IF to_regprocedure('monitor.evaluate_more_rules(bigint)') IS NOT NULL THEN
+        SELECT e.opened, e.resolved INTO v_step_opened, v_step_resolved
+          FROM monitor.evaluate_more_rules(v_sid) e;
+        v_opened := v_opened + COALESCE(v_step_opened, 0);
+        v_resolved := v_resolved + COALESCE(v_step_resolved, 0);
     END IF;
 
     RETURN QUERY SELECT v_sid, v_at, v_sessions, v_edges, v_statements,

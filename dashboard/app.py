@@ -299,38 +299,150 @@ def with_alert_target(df: pd.DataFrame, dead_tables: dict[int, str]) -> pd.DataF
 
 
 # --------------------------------------------------------------------------- #
-# sidebar (outside the auto-refreshing fragment so its widgets stay live)
+# page styling + sidebar
 # --------------------------------------------------------------------------- #
+CSS = """
+<style>
+#MainMenu, header[data-testid="stHeader"], footer {visibility: hidden;}
+.block-container {padding-top: 1.3rem; padding-bottom: 2.5rem; max-width: 1300px;}
+div[data-testid="stMetric"] {
+  border: 1px solid rgba(128,128,128,.22);
+  border-radius: 12px;
+  padding: 12px 16px;
+  background: rgba(128,128,128,.06);
+}
+div[data-testid="stMetricLabel"] p {font-size: .82rem; opacity: .78;}
+.pill {display:inline-block; padding:2px 10px; border-radius:999px; font-size:.78rem; font-weight:650; vertical-align:middle;}
+.pill-live {background:rgba(35,134,54,.15); color:#2ea043;}
+.pill-warn {background:rgba(210,153,34,.16); color:#bf8700;}
+.pill-down {background:rgba(207,34,46,.15); color:#d1242f;}
+.conn {border:1px solid rgba(128,128,128,.22); border-radius:10px; padding:8px 12px; margin:4px 0 8px;}
+.conn div {display:flex; justify-content:space-between; gap:12px; font-size:.85rem; padding:2px 0;}
+.conn span {opacity:.68;}
+</style>
+"""
+st.markdown(CSS, unsafe_allow_html=True)
+
 env = load_env()
 DBNAME = os.environ.get("DASH_DB") or env.get("PGDATABASE", "shopdb")
 INTERVAL = int(os.environ.get("COLLECT_INTERVAL_SECONDS") or env.get("COLLECT_INTERVAL_SECONDS") or 60)
 STALE_AFTER = 2.5 * INTERVAL
+PGHOST = env.get("PGHOST", "127.0.0.1")
+PGPORT = env.get("PGPORT", "55432")
 
 with st.sidebar:
-    st.header("Connection")
-    st.caption("read-only role · SELECT on monitor.v_* views only")
-    st.code(f"database: {DBNAME}\nrole:     monitor_reader\nhost:     {env.get('PGHOST', '127.0.0.1')}:{env.get('PGPORT', '55432')}",
-            language="text")
-    st.header("View")
-    window = st.slider("Snapshots in history", 3, 60, DEFAULT_WINDOW, 1)
-    auto = st.checkbox(f"Auto-refresh every {REFRESH_SECONDS} s", value=True)
-    if st.button("Refresh now"):
+    st.markdown("### Controls")
+    window = st.slider(
+        "History window", 3, 60, DEFAULT_WINDOW, 1,
+        help="How many recent snapshots the charts and lock history cover.",
+    )
+    auto = st.toggle(
+        f"Live refresh ({REFRESH_SECONDS}s)", value=True,
+        help="Re-runs the page on a timer. Turn it off to freeze a view.",
+    )
+    if st.button("Refresh now", type="primary"):
         st.cache_data.clear()
         st.rerun()
+
+    st.divider()
+    st.markdown("### Connection")
+    st.markdown(
+        f"""
+        <div class="conn">
+          <div><span>Database</span><b>{DBNAME}</b></div>
+          <div><span>Host</span><b>{PGHOST}:{PGPORT}</b></div>
+          <div><span>Role</span><b>monitor_reader</b></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("Read-only: SELECT on the sanitized `monitor.v_*` views only.")
+
+    with st.expander("Create demo traffic"):
+        st.markdown(
+            "Use this when the dashboard looks quiet. It opens a real row lock "
+            "for two minutes so alerts fire and then resolve:\n\n"
+            "```bash\ndocker compose run --rm demo\n```"
+        )
+
+    with st.expander("Troubleshooting"):
+        st.markdown(
+            "- **Data looks stale** → `docker compose ps`; collection is the "
+            "in-database `pg_cron` job, so the postgres container must be healthy.\n"
+            "- **Dashboard is down** → `docker compose logs dashboard --tail 100`.\n"
+            "- **Start over** → `docker compose down -v && docker compose up -d --build` "
+            "(this deletes all history)."
+        )
+
     st.divider()
     st.caption(
-        f"Timestamps: America/Chicago (CT). Staleness warning when the latest "
-        f"snapshot is older than 2.5 x {INTERVAL}s collector interval "
-        f"({STALE_AFTER:.0f}s)."
+        f"Times: America/Chicago (CT). A snapshot older than 2.5 × {INTERVAL}s "
+        f"({STALE_AFTER:.0f}s) is flagged stale."
     )
 
 
+# --------------------------------------------------------------------------- #
+# small chart helpers
+# --------------------------------------------------------------------------- #
+def lock_series(locks: pd.DataFrame) -> pd.Series:
+    edges = (
+        locks.groupby(["snapshot_id", "captured_at"], as_index=False)
+        .size()
+        .rename(columns={"size": "lock_edges"})
+        .sort_values("snapshot_id")
+    )
+    edges["snapshot"] = [
+        f"#{int(r.snapshot_id)} {ct(r.captured_at)[11:19]}" for r in edges.itertuples()
+    ]
+    return edges.set_index("snapshot")["lock_edges"]
+
+
+def session_frame(sessions: pd.DataFrame) -> pd.DataFrame:
+    pivot = (
+        sessions.pivot_table(
+            index=["snapshot_id", "captured_at"],
+            columns="state",
+            values="sessions",
+            aggfunc="sum",
+            fill_value=0,
+        )
+        .reset_index()
+        .sort_values("snapshot_id")
+    )
+    pivot["snapshot"] = [
+        f"#{int(r.snapshot_id)} {ct(r.captured_at)[11:19]}" for r in pivot.itertuples()
+    ]
+    return pivot.set_index("snapshot").drop(columns=["snapshot_id", "captured_at"])
+
+
+RULE_HELP = pd.DataFrame(
+    [
+        ("blocked_session", "A session has been waiting on another session's lock past the threshold.", "critical"),
+        ("idle_in_transaction", "A transaction has been idle (holding locks) past the threshold.", "warning"),
+        ("long_active_query", "A query has been running longer than the threshold.", "warning"),
+        ("connection_saturation", "The database is using a high share of its allowed connections.", "critical"),
+        ("cache_hit_ratio", "The buffer cache hit ratio fell below the configured floor.", "warning"),
+        ("dead_tuple_risk", "A table has accumulated too many dead tuples; VACUUM is due.", "warning"),
+    ],
+    columns=["rule", "what it means", "default severity"],
+)
+
+
+# --------------------------------------------------------------------------- #
+# page
+# --------------------------------------------------------------------------- #
 def render() -> None:
     try:
         data = load_data(DBNAME, window)
     except Exception as exc:  # noqa: BLE001 - surface any driver/auth error plainly
-        st.error("Could not read the monitoring views as `monitor_reader`.")
-        st.exception(exc)
+        st.markdown("## Database health at a glance")
+        st.error("The dashboard can't reach the monitoring database right now.")
+        st.markdown(
+            "Check that the Docker stack is running (`docker compose ps`), then press "
+            "**Refresh now** in the sidebar."
+        )
+        with st.expander("Technical details"):
+            st.exception(exc)
         return
 
     who = data["who"].iloc[0]
@@ -340,219 +452,260 @@ def render() -> None:
     age = age_seconds(latest_ts)
     stale = age is not None and age > STALE_AFTER
 
-    st.title("PostgreSQL Monitoring Dashboard (CSCE 4355)")
+    open_alerts = with_alert_target(data["alerts_open"], data.get("dead_table_names", {}))
+    resolved = with_alert_target(data["alerts_resolved"], data.get("dead_table_names", {}))
+    blockers = data["blockers"]
+    tables_latest = data["table_stats_latest"]
+
+    st.markdown("## Database health at a glance")
     st.caption(
-        "Historical lock/wait capture, current blockers and alert state. "
-        f"Read-only session as `{who['connected_role']}` · all times America/Chicago (CT)."
+        f"`{who['dbname']}` · read-only session as `{who['connected_role']}` · "
+        "all times America/Chicago (CT)"
     )
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Database", str(who["dbname"]))
-    c2.metric("Connected role", str(who["connected_role"]))
-    c3.metric("Latest snapshot", f"#{latest_id}" if latest_id else "none")
-    c4.metric("Snapshot age", f"{age:.0f} s" if age is not None else "—")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Open alerts", len(open_alerts), help="Alerts currently firing.")
+    m2.metric("Waiting on locks", len(blockers), help="Blocked/blocker pairs in the latest snapshot.")
+    m3.metric("Snapshot age", f"{age:.0f}s" if age is not None else "—", help=f"Collector cadence: {INTERVAL}s.")
+    m4.metric(
+        "Tables sampled",
+        len(tables_latest) if data["available"].get("monitor.v_table_stats") else "—",
+        help="Tables captured in the latest history snapshot.",
+    )
 
     if latest_id is None:
-        st.warning("No snapshots yet — start the collector (`scripts/collect.py`).")
+        st.warning(
+            "Waiting for the first snapshot. The in-database collector runs every "
+            f"{INTERVAL}s — this page will fill in automatically."
+        )
     elif stale:
         st.error(
-            f"STALE DATA: latest snapshot #{latest_id} captured {ct(latest_ts)} is "
-            f"{age:.0f}s old (> {STALE_AFTER:.0f}s = 2.5 x {INTERVAL}s interval). "
-            "The collector may have stopped."
+            f"Data is stale: snapshot #{latest_id} is {age:.0f}s old "
+            f"(limit {STALE_AFTER:.0f}s). Check `docker compose ps` — the collector "
+            "runs inside the postgres container."
         )
     else:
         st.success(
-            f"Collector current: latest snapshot #{latest_id} at {ct(latest_ts)} "
-            f"({age:.0f}s ago). Server clock {ct(who['server_now'])}."
+            f"Live · snapshot #{latest_id} captured {ct(latest_ts)} ({age:.0f}s ago). "
+            f"Server clock {ct(who['server_now'])}."
         )
 
-    # ---------------- 1. alerts ----------------
-    st.subheader("1 · Alerts")
-    dead_tables = data.get("dead_table_names", {})
-    open_alerts = with_alert_target(data["alerts_open"], dead_tables)
-    resolved = with_alert_target(data["alerts_resolved"], dead_tables)
-
-    known_rules = sorted(
-        {str(x) for x in open_alerts["rule_name"].dropna()}
-        | {str(x) for x in resolved["rule_name"].dropna()}
+    tab_overview, tab_alerts, tab_locks, tab_perf, tab_help = st.tabs(
+        ["Overview", "Alerts", "Locks & sessions", "Performance", "Help"]
     )
-    picked_rules = known_rules
-    if known_rules:
-        picked_rules = st.multiselect(
-            "Filter alerts by rule_name",
-            known_rules,
-            default=known_rules,
-            key="alert_rule_filter",
-            help="Applies to both the open and resolved alert tables below.",
-        )
-    open_view = open_alerts[open_alerts["rule_name"].astype(str).isin(picked_rules)]
-    resolved_view = resolved[resolved["rule_name"].astype(str).isin(picked_rules)]
 
-    a1, a2 = st.columns([1, 1])
-    a1.metric("Open alerts", len(open_view))
-    a2.metric("Resolved alerts (shown)", len(resolved_view))
+    # ------------------------------------------------------------------ #
+    # Overview
+    # ------------------------------------------------------------------ #
+    with tab_overview:
+        left, right = st.columns([1.2, 1])
+        with left:
+            st.markdown("#### What needs attention")
+            if len(open_alerts):
+                st.error(f"{len(open_alerts)} alert(s) open")
+                show = open_alerts.assign(fired_at=open_alerts["fired_at"].map(ct))
+                st.dataframe(
+                    show[["rule_name", "severity", "target", "fired_at", "observed_seconds"]],
+                    hide_index=True, width="stretch",
+                )
+            else:
+                st.success("All clear — no open alerts.")
 
-    if len(open_view):
-        st.error(f"{len(open_view)} open alert(s) — blocking threshold currently exceeded.")
-        show = open_view.assign(
-            fired_at=open_view["fired_at"].map(ct),
-            first_seen_at=open_view["first_seen_at"].map(ct),
-            eligible_at=open_view["eligible_at"].map(ct),
-            notified_at=open_view["notified_at"].map(ct),
-        )
-        styled = show.style.apply(
-            lambda _row: ["background-color: #5c1a1a"] * len(_row), axis=1
-        )
-        st.dataframe(styled, width="stretch", hide_index=True)
-    elif known_rules and len(picked_rules) != len(known_rules):
-        st.success("No open alerts match the selected rule filter.")
-    else:
-        st.success("No open alerts.")
+            st.markdown("#### Blocking right now")
+            if len(blockers):
+                st.warning(f"{len(blockers)} session(s) waiting on a lock")
+                show = blockers.assign(
+                    captured_at=blockers["captured_at"].map(ct),
+                    wait_started=blockers["wait_started"].map(ct),
+                )
+                st.dataframe(
+                    show[["blocked_pid", "blocker_pid", "blocked_user",
+                          "blocker_state", "waited_seconds", "wait_started"]],
+                    hide_index=True, width="stretch",
+                )
+            else:
+                st.success("No sessions are waiting on a lock.")
 
-    st.markdown("**Resolved alerts**")
-    if len(resolved_view):
-        show = resolved_view.assign(
-            fired_at=resolved_view["fired_at"].map(ct),
-            resolved_at=resolved_view["resolved_at"].map(ct),
-            notified_at=resolved_view["notified_at"].map(ct),
-            resolve_notified_at=resolved_view["resolve_notified_at"].map(ct),
-        )
-        st.dataframe(show, width="stretch", hide_index=True)
-    else:
-        st.caption("No resolved alerts match the current filter.")
+        with right:
+            st.markdown("#### Recent activity")
+            st.caption("Lock edges per snapshot")
+            if len(data["locks"]):
+                st.bar_chart(lock_series(data["locks"]), height=200)
+            else:
+                st.info("No lock waits in this window. Use **Create demo traffic** in the sidebar.")
 
-    # ---------------- 2. current blockers ----------------
-    st.subheader("2 · Current blockers")
-    blockers = data["blockers"]
-    if len(blockers):
-        st.warning(f"{len(blockers)} blocked/blocker edge(s) at snapshot #{latest_id}.")
-        show = blockers.assign(
-            captured_at=blockers["captured_at"].map(ct),
-            wait_started=blockers["wait_started"].map(ct),
-        )
-        st.dataframe(show, width="stretch", hide_index=True)
-    else:
-        st.info("No blocking at latest snapshot.")
+            st.caption("Last resolved alerts")
+            if len(resolved):
+                recent = resolved.head(5).assign(resolved_at=resolved.head(5)["resolved_at"].map(ct))
+                st.dataframe(
+                    recent[["rule_name", "target", "resolved_at", "observed_seconds"]],
+                    hide_index=True, width="stretch",
+                )
+            else:
+                st.caption("Nothing resolved yet.")
 
-    # ---------------- 3. lock history ----------------
-    st.subheader(f"3 · Lock history (last {len(snaps)} snapshots)")
-    locks = data["locks"]
-    if len(locks):
-        show = locks.assign(
-            captured_at=locks["captured_at"].map(ct),
-            wait_started=locks["wait_started"].map(ct),
+    # ------------------------------------------------------------------ #
+    # Alerts
+    # ------------------------------------------------------------------ #
+    with tab_alerts:
+        known_rules = sorted(
+            {str(x) for x in open_alerts["rule_name"].dropna()}
+            | {str(x) for x in resolved["rule_name"].dropna()}
         )
-        st.dataframe(show, width="stretch", hide_index=True)
-
-        edges = (
-            locks.groupby(["snapshot_id", "captured_at"], as_index=False)
-            .size()
-            .rename(columns={"size": "lock_edges"})
-            .sort_values("snapshot_id")
-        )
-        edges["snapshot"] = [
-            f"#{r.snapshot_id} {ct(r.captured_at)[11:19]}" for r in edges.itertuples()
-        ]
-        st.caption("Lock edges captured per snapshot (waiter → blocker pairs)")
-        st.line_chart(edges.set_index("snapshot")["lock_edges"], height=220)
-    else:
-        st.info("No lock waits recorded in the selected window.")
-
-    # ---------------- 4. sessions + database stats ----------------
-    st.subheader("4 · Session state and database counters")
-    sess = data["sessions"]
-    if len(sess):
-        pivot = (
-            sess.pivot_table(
-                index=["snapshot_id", "captured_at"],
-                columns="state",
-                values="sessions",
-                aggfunc="sum",
-                fill_value=0,
+        picked = (
+            st.multiselect(
+                "Filter by rule", known_rules, default=known_rules,
+                help="Applies to both tables on this tab.",
             )
-            .reset_index()
-            .sort_values("snapshot_id")
+            if known_rules else known_rules
         )
-        pivot["snapshot"] = [
-            f"#{int(r.snapshot_id)} {ct(r.captured_at)[11:19]}" for r in pivot.itertuples()
-        ]
-        state_cols = [c for c in pivot.columns if c not in ("snapshot_id", "captured_at", "snapshot")]
-        st.caption("Client backends per state, per snapshot")
-        st.line_chart(pivot.set_index("snapshot")[state_cols], height=240)
-    else:
-        st.info("No session samples in the selected window.")
+        open_view = open_alerts[open_alerts["rule_name"].astype(str).isin(picked)]
+        resolved_view = resolved[resolved["rule_name"].astype(str).isin(picked)]
 
-    stats = data["dbstats"]
-    if len(stats):
-        delta_cols = ["xact_commit_delta", "xact_rollback_delta", "blks_read_delta", "blks_hit_delta"]
-        # NULL delta = unknown (first sample / stats reset), never 0. Values are
-        # rendered as text so an "unknown" cell keeps one Arrow-safe column type.
-        shown = stats.assign(
-            captured_at=stats["captured_at"].map(ct),
-            **{
-                c: stats[c].map(lambda v: "unknown" if pd.isna(v) else f"{int(v):,}")
-                for c in delta_cols
-            },
-        )
-        st.caption("Database counters per snapshot — `unknown` means no comparable previous sample (NULL delta), not zero.")
-        st.dataframe(shown, width="stretch", hide_index=True)
+        a1, a2 = st.columns(2)
+        a1.metric("Open alerts", len(open_view))
+        a2.metric("Resolved alerts (shown)", len(resolved_view))
 
-        chart = stats.dropna(subset=["xact_commit_delta"]).copy()
-        if len(chart):
-            chart["snapshot"] = [
-                f"#{int(r.snapshot_id)} {ct(r.captured_at)[11:19]}" for r in chart.itertuples()
-            ]
-            st.caption("xact_commit delta per interval")
-            st.bar_chart(chart.set_index("snapshot")["xact_commit_delta"], height=200)
-    else:
-        st.info("No database counter samples in the selected window.")
+        st.markdown("#### Open alerts")
+        if len(open_view):
+            show = open_view.assign(
+                fired_at=open_view["fired_at"].map(ct),
+                notified_at=open_view["notified_at"].map(ct),
+            )
+            st.dataframe(
+                show[["alert_id", "rule_name", "severity", "target", "fired_at",
+                      "observed_seconds", "notified_at"]],
+                hide_index=True, width="stretch",
+            )
+            st.download_button(
+                "Download open alerts (CSV)",
+                show.to_csv(index=False).encode("utf-8"),
+                "open_alerts.csv", "text/csv",
+            )
+        else:
+            st.success("No open alerts right now.")
 
-    # ---------------- 5. table health ----------------
-    st.subheader("5 · Table health")
-    if not data["available"].get("monitor.v_table_stats"):
-        st.info(
-            "Table health: `monitor.v_table_stats` **not available in this database** — "
-            "the optional history views have not been installed here."
-        )
-    else:
-        tables = data["table_stats_latest"]
-        if len(tables):
-            tables = tables.copy()
-            tables["table"] = tables["schemaname"].astype(str) + "." + tables["relname"].astype(str)
-            tables["dead_pct"] = tables["dead_ratio"].map(
+        st.markdown("#### Resolved alerts")
+        if len(resolved_view):
+            show = resolved_view.assign(
+                fired_at=resolved_view["fired_at"].map(ct),
+                resolved_at=resolved_view["resolved_at"].map(ct),
+                notified_at=resolved_view["notified_at"].map(ct),
+            )
+            st.dataframe(
+                show[["alert_id", "rule_name", "severity", "target", "fired_at",
+                      "resolved_at", "observed_seconds"]],
+                hide_index=True, width="stretch",
+            )
+            st.download_button(
+                "Download resolved alerts (CSV)",
+                show.to_csv(index=False).encode("utf-8"),
+                "resolved_alerts.csv", "text/csv",
+            )
+        else:
+            st.info("No resolved alerts match the current filter.")
+
+    # ------------------------------------------------------------------ #
+    # Locks & sessions
+    # ------------------------------------------------------------------ #
+    with tab_locks:
+        st.markdown("#### Blocking at the latest snapshot")
+        if len(blockers):
+            show = blockers.assign(
+                captured_at=blockers["captured_at"].map(ct),
+                wait_started=blockers["wait_started"].map(ct),
+            )
+            st.dataframe(
+                show[["blocked_pid", "blocker_pid", "blocked_user", "blocker_user",
+                      "blocked_app", "blocker_state", "waited_seconds", "wait_started"]],
+                hide_index=True, width="stretch",
+            )
+        else:
+            st.success("No blocking at the latest snapshot.")
+
+        st.markdown(f"#### Lock history — last {len(snaps)} snapshots")
+        if len(data["locks"]):
+            st.bar_chart(lock_series(data["locks"]), height=220)
+            show = data["locks"].assign(
+                captured_at=data["locks"]["captured_at"].map(ct),
+                wait_started=data["locks"]["wait_started"].map(ct),
+            )
+            st.dataframe(
+                show[["snapshot_id", "captured_at", "blocked_pid", "blocker_pid",
+                      "blocked_user", "blocker_user", "blocked_app", "waited_seconds"]],
+                hide_index=True, width="stretch",
+            )
+        else:
+            st.info("No lock waits recorded in the selected window.")
+
+        st.markdown("#### Session states")
+        if len(data["sessions"]):
+            st.line_chart(session_frame(data["sessions"]), height=240)
+        else:
+            st.info("No session samples in the selected window.")
+
+    # ------------------------------------------------------------------ #
+    # Performance
+    # ------------------------------------------------------------------ #
+    with tab_perf:
+        stats = data["dbstats"]
+        st.markdown("#### Database counters")
+        if len(stats):
+            delta_cols = ["xact_commit_delta", "xact_rollback_delta",
+                          "blks_read_delta", "blks_hit_delta"]
+            shown = stats.assign(
+                captured_at=stats["captured_at"].map(ct),
+                **{
+                    c: stats[c].map(lambda v: "unknown" if pd.isna(v) else f"{int(v):,}")
+                    for c in delta_cols
+                },
+            )
+            st.caption("Deltas cover the interval since the previous sample; `unknown` means no comparable sample (not zero).")
+            st.dataframe(
+                shown[["snapshot_id", "captured_at", "numbackends", "deadlocks",
+                       *delta_cols]],
+                hide_index=True, width="stretch",
+            )
+            chart = stats.dropna(subset=["xact_commit_delta"]).copy()
+            if len(chart):
+                chart["snapshot"] = [
+                    f"#{int(r.snapshot_id)} {ct(r.captured_at)[11:19]}" for r in chart.itertuples()
+                ]
+                st.caption("Transactions committed per interval")
+                st.bar_chart(chart.set_index("snapshot")["xact_commit_delta"], height=200)
+        else:
+            st.info("No database counter samples in the selected window.")
+
+        st.markdown("#### Table health")
+        if not data["available"].get("monitor.v_table_stats"):
+            st.info("Table health views are not installed in this database.")
+        elif len(tables_latest):
+            tbl = tables_latest.copy()
+            tbl["table"] = tbl["schemaname"].astype(str) + "." + tbl["relname"].astype(str)
+            tbl["dead_pct"] = tbl["dead_ratio"].map(
                 lambda v: f"{float(v):.2%}" if pd.notna(v) else "—"
             )
             t1, t2, t3 = st.columns(3)
-            t1.metric("Tables in latest snapshot", len(tables))
-            t2.metric("Dead tuples (latest)", f"{int(tables['n_dead_tup'].fillna(0).sum()):,}")
-            t3.metric("Max dead ratio", f"{float(tables['dead_ratio'].fillna(0).max()):.2%}")
-            st.caption(
-                "Latest snapshot per table — live/dead tuples, dead ratio, "
-                "sequential vs index scans."
-            )
+            t1.metric("Tables in latest snapshot", len(tbl))
+            t2.metric("Dead tuples", f"{int(tbl['n_dead_tup'].fillna(0).sum()):,}")
+            t3.metric("Max dead ratio", f"{float(tbl['dead_ratio'].fillna(0).max()):.2%}")
             st.dataframe(
-                tables[["table", "n_live_tup", "n_dead_tup", "dead_pct", "seq_scan", "idx_scan"]],
-                width="stretch",
-                hide_index=True,
+                tbl[["table", "n_live_tup", "n_dead_tup", "dead_pct", "seq_scan", "idx_scan"]],
+                hide_index=True, width="stretch",
             )
 
             hist = data["table_stats_history"]
             if len(hist):
                 hist = hist.copy()
                 hist["table"] = hist["schemaname"].astype(str) + "." + hist["relname"].astype(str)
-                top_tables = (
-                    tables.sort_values("n_dead_tup", ascending=False)["table"].head(6).tolist()
-                )
+                top_tables = tbl.sort_values("n_dead_tup", ascending=False)["table"].head(6).tolist()
                 hist = hist[hist["table"].isin(top_tables)]
                 pivot = (
                     hist.pivot_table(
-                        index=["snapshot_id", "captured_at"],
-                        columns="table",
-                        values="n_dead_tup",
-                        aggfunc="max",
+                        index=["snapshot_id", "captured_at"], columns="table",
+                        values="n_dead_tup", aggfunc="max",
                     )
-                    .reset_index()
-                    .sort_values("snapshot_id")
+                    .reset_index().sort_values("snapshot_id")
                 )
                 chart_cols = [c for c in top_tables if c in pivot.columns]
                 if chart_cols:
@@ -563,65 +716,83 @@ def render() -> None:
                     st.caption("Dead tuples over time (six tables with the most dead tuples)")
                     st.line_chart(pivot.set_index("snapshot")[chart_cols], height=240)
         else:
-            st.info("`monitor.v_table_stats` exists but has no samples yet.")
+            st.info("No table samples yet — the next collector run will fill this in.")
 
-    # ---------------- 6. top statements ----------------
-    st.subheader("6 · Top statements by total execution time")
-    if not data["available"].get("monitor.v_statement_stats"):
-        st.info(
-            "Top statements: `monitor.v_statement_stats` **not available in this database** — "
-            "the optional history views have not been installed here."
-        )
-    else:
-        stmt = data["statement_stats"]
-        if len(stmt):
-            show = stmt.copy()
-            show["queryid"] = show["queryid"].map(lambda v: str(int(v)) if pd.notna(v) else "—")
-            show["calls_delta"] = show["calls_delta"].map(
+        st.markdown("#### Top statements by total execution time")
+        if not data["available"].get("monitor.v_statement_stats"):
+            st.info("Statement history views are not installed in this database.")
+        elif len(data["statement_stats"]):
+            stmt = data["statement_stats"].copy()
+            stmt["queryid"] = stmt["queryid"].map(lambda v: str(int(v)) if pd.notna(v) else "—")
+            stmt["calls_delta"] = stmt["calls_delta"].map(
                 lambda v: f"{int(v):,}" if pd.notna(v) else "unknown"
             )
-            show["total_exec_time_delta"] = show["total_exec_time_delta"].map(
+            stmt["total_exec_time_delta"] = stmt["total_exec_time_delta"].map(
                 lambda v: f"{float(v):,.1f} ms" if pd.notna(v) else "unknown"
             )
-            show["mean_exec_time"] = show["mean_exec_time"].map(
+            stmt["mean_exec_time"] = stmt["mean_exec_time"].map(
                 lambda v: f"{float(v):,.3f} ms" if pd.notna(v) else "—"
             )
-            st.caption(
-                "Latest snapshot only, ordered by `total_exec_time_delta`. "
-                "`queryid` only — the contract stores no SQL text."
+            st.caption("Latest snapshot only, ordered by total execution time. Query IDs only — no SQL text is stored.")
+            st.dataframe(
+                stmt[["queryid", "calls_delta", "total_exec_time_delta", "mean_exec_time"]],
+                hide_index=True, width="stretch",
             )
-            st.dataframe(show, width="stretch", hide_index=True)
-
-            chart = stmt.dropna(subset=["total_exec_time_delta"]).head(10).copy()
+            chart = data["statement_stats"].dropna(subset=["total_exec_time_delta"]).head(10).copy()
             if len(chart):
                 chart["label"] = chart["queryid"].map(lambda v: f"q{int(v)}")
-                st.caption("total_exec_time_delta (ms), top 10 queryids")
                 st.bar_chart(chart.set_index("label")["total_exec_time_delta"], height=220)
         else:
-            st.info("`monitor.v_statement_stats` exists but has no samples in its latest snapshot.")
+            st.info("No statement samples in the latest snapshot.")
 
-    # ---------------- 7. hourly rollup ----------------
-    st.subheader("7 · Hourly rollup")
-    if not data["available"].get("monitor.v_hourly_rollup"):
-        st.info(
-            "Hourly rollup: `monitor.v_hourly_rollup` **not available in this database** — "
-            "the optional history views have not been installed here."
-        )
-    else:
-        roll = data["hourly_rollup"]
-        if len(roll):
-            show = roll.copy()
-            show["hour"] = show["hour"].map(ct)
-            show["blks_hit_ratio"] = show["blks_hit_ratio"].map(
+        st.markdown("#### Hourly rollup")
+        if not data["available"].get("monitor.v_hourly_rollup"):
+            st.info("Hourly rollup is not installed in this database.")
+        elif len(data["hourly_rollup"]):
+            roll = data["hourly_rollup"].copy()
+            roll["hour"] = roll["hour"].map(ct)
+            roll["blks_hit_ratio"] = roll["blks_hit_ratio"].map(
                 lambda v: f"{float(v):.2%}" if pd.notna(v) else "unknown"
             )
-            st.caption(
-                "Per-hour rollup (most recent first): snapshots, peak lock edges/sessions, "
-                "commit delta sum, block cache hit ratio, alerts fired."
-            )
-            st.dataframe(show, width="stretch", hide_index=True)
+            st.dataframe(roll, hide_index=True, width="stretch")
         else:
-            st.info("`monitor.v_hourly_rollup` exists but has no hourly rows yet.")
+            st.info("No hourly rows yet.")
+
+    # ------------------------------------------------------------------ #
+    # Help
+    # ------------------------------------------------------------------ #
+    with tab_help:
+        st.markdown(
+            "#### What this page is\n"
+            "A read-only view of the `monitor` schema. The database collects one "
+            "snapshot a minute; this page only ever runs SELECTs against sanitized "
+            "views, so it cannot change data or read customer rows."
+        )
+        st.markdown(
+            "#### Alert rules\n"
+            "Each rule opens one alert, waits for its threshold, then resolves the "
+            "same alert when the condition clears."
+        )
+        st.dataframe(RULE_HELP, hide_index=True, width="stretch")
+        st.markdown(
+            "#### Run the demo\n"
+            "```bash\n"
+            "# 1. open the dashboard\n"
+            "bash scripts/start_dashboard.sh     # or: docker compose up -d --build\n\n"
+            "# 2. in a second terminal, create a real lock wait\n"
+            "docker compose run --rm demo\n"
+            "```\n"
+            "The demo holds a row lock for two minutes. Alerts appear under **Alerts** "
+            "while it is held and resolve on the snapshot after it releases."
+        )
+        st.markdown(
+            "#### Under the hood\n"
+            "- `pg_cron` calls `monitor.capture_snapshot()` every 60 s inside postgres.\n"
+            "- The function writes the snapshot, session, lock and counter rows and "
+            "evaluates all six rules in the same transaction.\n"
+            "- The notifier container prints fired/resolved alerts and stamps delivery.\n"
+            "- The dashboard reads only `monitor.v_*` as `monitor_reader`."
+        )
 
     st.divider()
     st.caption(
