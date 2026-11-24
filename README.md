@@ -17,8 +17,9 @@ The delivered demonstration is deliberately narrow: **one DBA workflow, end to e
 shop develops lock contention, the collector preserves who blocked whom, the rule fires, the console
 notifier reports it, the dashboard shows the same event, the alert resolves after the lock clears.
 The proposal's six alert rules and six shop tables are delivered, and all six rules have a captured
-run showing the alert open and resolve; the Grafana dashboard is not delivered. The Docker Compose
-stack and `pg_cron` scheduling exist as optional modules that the verified run does not use (§10).
+run showing the alert open and resolve; the Grafana dashboard is not delivered. The same pipeline
+also ships as a one-command Docker Compose stack (PostgreSQL 16 + `pg_cron` + the Streamlit dashboard
+and the console notifier, §4.4); the local-cluster run described below remains the reference run.
 
 ### 1.1 Verified result (live run, 2026-11-22)
 
@@ -75,7 +76,7 @@ workload (shop_app)  ->  PostgreSQL 17.11 statistics views  ->  Python collector
 
 | Component | Implementation | Notes |
 |---|---|---|
-| DBMS | PostgreSQL **17.11**, disposable non-admin cluster in `./.pgdata` on `127.0.0.1:55432`; or PostgreSQL 16 + `pg_cron` via `docker-compose.yml` (§4.4) | Docker stack added in M1, not yet run; see §10 |
+| DBMS | PostgreSQL **17.11**, disposable non-admin cluster in `./.pgdata` on `127.0.0.1:55432`; or PostgreSQL 16 + `pg_cron` via `docker-compose.yml` (§4.4) | Docker stack verified live on 2026-11-23; see §4.4 |
 | Statistics source | `pg_stat_activity`, `pg_blocking_pids()`, `pg_locks`, `pg_stat_database`, `pg_stat_statements` 1.11, `pg_stat_user_tables`/`indexes`, `pg_statio_*` | `pg_stat_statements` preloaded at cluster init |
 | Collection | `monitor.capture_snapshot()` (PL/pgSQL), called every 60 s by `scripts/collect.py` (local cluster) or `pg_cron` (Docker) | One function, two schedulers; `collect.py` falls back to its inline SQL on databases built before the function existed |
 | History / alerting | `monitor` schema: `snapshot`, `session_sample`, `lock_wait`, `db_stat_sample`, `statement_history`, `table_stats_history`, `index_stats_history`, `alert_rule`, `alert_log`; `monitor.evaluate_alerts()`; `monitor.purge_old_snapshots()` | Owned by `monitor_collector` |
@@ -99,9 +100,9 @@ Streamlit 1.67.0; versions other than PostgreSQL's are not part of the reproduct
 | PostgreSQL 17 binaries | `C:/Program Files/PostgreSQL/17/bin` containing `initdb.exe`, `pg_ctl.exe`, `pg_isready.exe`, `psql.exe`. The scripts prepend this directory to `PATH` themselves. Override with `PGBIN=...` if installed elsewhere. |
 | Python | 3.12, virtual environment at `.venv` |
 | `uv` | Used to create the venv and install packages |
-| Ports | `55432` (project cluster) and `8501` (dashboard) free. The existing Windows PostgreSQL service on `5432` is never touched. |
+| Ports | `55432` (project cluster) and `8501` (dashboard; Docker host port override: `DASHBOARD_PORT`) free. The existing Windows PostgreSQL service on `5432` is never touched. |
 | Privileges | **No administrator rights required.** The cluster lives under `./.pgdata` and runs as the current user. |
-| Docker | **Not required and not used.** Docker was not installed on the build machine. |
+| Docker (quick start only) | Optional. §4.0 needs Docker Engine or Docker Desktop with the Compose v2 plugin (`docker compose version`), a reachable daemon, `curl`, and — only when the script has to create `.env` — Python 3. The docker CLI must be on the `PATH` of the shell that runs the script. On Windows, if Docker runs inside WSL 2, run the script from WSL (§4.0). The local-cluster path does not use Docker. |
 
 Create the environment and install the runtime dependencies:
 
@@ -113,6 +114,32 @@ uv pip install --python .venv/Scripts/python.exe python-docx matplotlib
 ```
 
 ## 4. Setup
+
+### 4.0 One-command Docker quick start (recommended for a demo)
+
+```bash
+bash scripts/start_dashboard.sh
+```
+
+On the machine used for the recorded run the Docker CLI is installed inside WSL 2 and is not on
+Git Bash's `PATH`; from the repository root run the script there instead:
+
+```bash
+wsl.exe -e bash scripts/start_dashboard.sh
+```
+
+The script checks for the docker CLI, Compose v2, a reachable daemon and `curl` before starting
+anything. It creates `.env` with random passwords on first run (that step needs a `python3` or
+`python` interpreter; an existing `.env` is never overwritten), builds and starts postgres, the
+dashboard and the notifier, asks Compose which host port the dashboard was actually published on
+(so a `DASHBOARD_PORT` exported in the shell or set in `.env` is honoured), and waits for
+`http://localhost:<port>/_stcore/health`.
+
+A generated `.env` is written LF-only, and the script attempts owner-only mode (`0600`). Git Bash
+and WSL's `/mnt/c` do not enforce POSIX modes, so the script prints a warning instead of pretending
+the file is protected; restrict its NTFS permissions yourself (§13). Sections 4.1–4.3 describe the
+manual local-cluster path — use one or the other, not both at once, because they share ports 55432
+and 8501. §4.4 lists what the stack contains and how to stop or reset it.
 
 ### 4.1 Configure `.env`
 
@@ -134,6 +161,13 @@ temporary password file.
 | `MONITOR_COLLECTOR_PASSWORD` | Password for the collector role |
 | `MONITOR_READER_PASSWORD` | Password for the dashboard role |
 | `COLLECT_INTERVAL_SECONDS` | Default collection interval (60) |
+| `DASHBOARD_PORT` | Docker only: host port for the Streamlit dashboard (default `8501`) |
+| `GRAFANA_ADMIN_PASSWORD` | Docker only: admin password for the optional Grafana profile |
+
+`DASHBOARD_PORT` and `GRAFANA_ADMIN_PASSWORD` are used only by Docker Compose. Compose gives a
+variable exported in the shell precedence over the same key in `.env`, and `.env` precedence over
+the defaults in `docker-compose.yml`; run `docker compose port dashboard 8501` to read the port the
+running container actually publishes.
 
 The cluster's listening port is taken from `.env` at initialization time: `scripts/start_cluster.sh`
 sources `.env` before it computes the port. **To use a different port, set `PGPORT` in `.env`
@@ -182,30 +216,55 @@ the `pg_stat_statements` version, and the seeded row counts. Expected with the s
 The script is safe to re-run: roles and the database are created only when missing, `sql/01_shop.sql`
 drops and rebuilds the shop tables, and the monitor objects use `IF NOT EXISTS` / `CREATE OR REPLACE`.
 
-### 4.4 Alternative: Docker Compose (PostgreSQL 16 + `pg_cron`)
+### 4.4 Docker Compose stack (PostgreSQL 16 + `pg_cron` + app services)
 
-The proposal's one-command environment (M1). It needs Docker Desktop and the same `.env` as §4.1;
-`scripts/start_cluster.sh` and `scripts/setup_db.sh` are not used. **Written but not yet built or run
-by the team — capture `docker compose up` output before relying on it.**
+The proposal's one-command environment (M1), extended with the delivered dashboard and notifier so
+the whole app starts together. `bash scripts/start_dashboard.sh` wraps the commands below, adds the
+prerequisite checks described in §4.0, waits for the dashboard health endpoint and prints the
+effective port; the manual local-cluster scripts (`start_cluster.sh`, `setup_db.sh`) are not used
+on this path.
 
 ```bash
-cp .env.example .env              # replace every change-me
+cp .env.example .env              # or let scripts/start_dashboard.sh generate one
 docker compose up -d --build      # first start runs every sql/[0-9][0-9]_*.sql
 docker compose logs postgres | grep project-init
 ```
 
-- The server listens on `127.0.0.1:${PGPORT}` (55432), so the collector, dashboard, notifier, tests and
-  workload scripts connect exactly as they do to the local cluster. Stop the local cluster first if
-  both would use the same port.
-- `pg_cron` runs `monitor.capture_snapshot()` (and therefore the alert rules) every minute as
-  `monitor_collector`, purges snapshots older than 7 days daily, and trims its own run log. **Do not
-  also run `scripts/collect.py`** against the same database. Check the jobs with
+| Service | Role | Address |
+|---|---|---|
+| `postgres` | PostgreSQL 16 + `pg_stat_statements` + `pg_cron`; applies every numbered script on an empty volume | `127.0.0.1:${PGPORT:-55432}` |
+| `dashboard` | Streamlit read-only dashboard (`dashboard/app.py`) | <http://localhost:8501> by default (`DASHBOARD_PORT`) |
+| `notifier` | console notifier; prints fired/resolved alerts every 30 s | — |
+| `demo` | optional lock-contention generator (profile `demo`) | `docker compose run --rm demo` |
+
+Verified live on 2026-11-23 (Windows 11, Docker Engine 29.1.3 in WSL 2): the stack built and
+started, `pg_cron` captured snapshots, `docker compose run --rm demo` produced `blocked_session`
+and `idle_in_transaction` alerts that fired on the next snapshot and resolved two minutes later,
+and the dashboard and notifier stayed healthy throughout.
+
+- Host ports default to `55432` for postgres (same as the local cluster) and `8501` for the
+  dashboard; set `PGPORT` / `DASHBOARD_PORT` to change them. Because Compose reads exported shell
+  variables ahead of `.env`, confirm the dashboard's effective mapping with
+  `docker compose port dashboard 8501` (or use the URL printed by the start script) instead of
+  assuming 8501. The app services reach postgres as `postgres:5432` on the Compose network, so no
+  code changes are needed. Stop the local cluster first if both would use one host port; both bind
+  `127.0.0.1` only.
+- `pg_cron` runs `monitor.capture_snapshot()` every minute as `monitor_collector`. The function stores
+  the snapshot, session, lock and counter rows, fills the history tables behind
+  `monitor.v_table_stats` / `v_statement_stats`, and evaluates **all six** alert rules in the same
+  transaction. It purges snapshots older than 7 days daily and trims its own run log. **Do not also
+  run `scripts/collect.py`** against the same database. Check the jobs with
   `SELECT jobname, schedule, username FROM cron.job;`.
 - Extra databases (for the pytest suite) are built inside the container:
   `docker compose exec postgres /docker-entrypoint-initdb.d/10_project_init.sh shopdb_t2`.
 - Optional Grafana: `docker compose --profile grafana up -d` (port 3000; provisioning files belong in
   `grafana/`).
-- Reset: `docker compose down -v` deletes the `pgdata` volume and all history.
+- Stop and keep history: `bash scripts/stop_dashboard.sh` (`docker compose down`). Reset everything:
+  `bash scripts/stop_dashboard.sh --reset` (`docker compose down -v`) deletes the `pgdata` volume and
+  all history. Both stop forms work even if `.env` was deleted, because stopping needs no
+  credentials. Logs: `docker compose logs -f dashboard`.
+- If the dashboard never answers, check `docker compose ps`,
+  `docker compose logs postgres | grep project-init` and `docker compose logs dashboard --tail 100`.
 
 ### 4.5 Proposal-scale data (optional)
 
@@ -362,12 +421,17 @@ Final_Project/
 ├── .env.example                  template for local credentials (copy to .env)
 ├── .gitignore                    excludes .env, .pgdata/, .venv/, caches
 ├── .gitattributes                LF endings for shell scripts and docker/ (Windows checkouts)
-├── docker-compose.yml            PostgreSQL 16 + pg_cron (and optional Grafana) — M1
+├── docker-compose.yml            PostgreSQL 16 + pg_cron + dashboard/notifier (optional Grafana) — M1
 ├── docker/postgres/
 │   ├── Dockerfile                postgres:16 + postgresql-16-cron
 │   ├── postgresql.conf           preload pg_stat_statements/pg_cron, track_io_timing, cron settings
 │   └── initdb/10_project_init.sh applies sql/ in order on first start (or for an extra database)
+├── docker/app/
+│   ├── Dockerfile                Python 3.13 runtime for dashboard, notifier and demo
+│   └── requirements.txt          streamlit, psycopg, pandas, tzdata
 ├── scripts/
+│   ├── start_dashboard.sh        one-command Compose stack: .env, build/up, health wait, URL
+│   ├── stop_dashboard.sh         stop the stack; --reset deletes the pgdata volume
 │   ├── start_cluster.sh          initdb (first run) + start/stop disposable PG17 cluster
 │   ├── setup_db.sh               roles, database, shop seed, monitor schema, summary
 │   ├── collect.py                60 s scheduler: calls monitor.capture_snapshot() (+ alerts)
@@ -440,12 +504,12 @@ Disclosed deviations from the approved proposal (all of them also appear in repo
 
 | Area | Proposed | Delivered |
 |---|---|---|
-| DBMS / provisioning | PostgreSQL 16 in Docker Compose | PostgreSQL **17.11** local cluster (verified); PostgreSQL 16 + `pg_cron` Compose stack added (M1, **not yet run**) |
+| DBMS / provisioning | PostgreSQL 16 in Docker Compose | PostgreSQL **17.11** local cluster (verified); PostgreSQL 16 + `pg_cron` Compose stack (dashboard + notifier) built and verified 2026-11-23 |
 | Scheduler | `pg_cron` in-database job | `pg_cron` jobs in Docker (`sql/90_cron_jobs.sql`); Python loop on the Windows cluster; both call `monitor.capture_snapshot()` |
 | Dashboard | Provisioned Grafana | Streamlit app on port 8501 (Grafana service available under a Compose profile, unprovisioned) |
 | Shop schema | 6 tables, ~100k customers / ~1M orders | 6 tables, **1,000 / 10,000** deterministic rows by default; `workload/seed_data.py` for proposal scale (not yet run) |
 | History | Session, statement, table, index, lock and database history; hourly rollup; retention | All six histories, an hourly rollup view (`monitor.v_hourly_rollup`, H1) and a 7-day purge function (M2/M3) |
-| Alert rules | 6 | All 6 implemented and verified live (§9); the three lane-R2 rules are evaluated by an explicit `monitor.evaluate_more_rules()` call, not yet chained from `monitor.evaluate_alerts()` |
+| Alert rules | 6 | All 6 implemented and verified live (§9); all six are chained from `monitor.capture_snapshot()` (which calls `evaluate_alerts`, `evaluate_extra_rules` and `evaluate_more_rules`) |
 | Overhead | `< 5 %` pgbench impact | Measured: −0.19 % mean TPS (collector on vs off, n = 3 each, 10 s interval) in `docs/results/perf_overhead.txt` |
 | Recording | Required video | **Outstanding** |
 
@@ -508,13 +572,19 @@ scripts/start_cluster.sh stop     # pg_ctl -m fast stop
 rm -rf .pgdata                    # destroys the database and all monitor history
 ```
 
-Stop the collector, notifier and Streamlit with `Ctrl+C` first. Deleting `.pgdata` is the documented
-reset: the next `scripts/start_cluster.sh` recreates an empty cluster and `scripts/setup_db.sh`
-rebuilds the schema and seed. `.env` is intentionally kept so the same passwords are reused.
+For the Docker stack, `bash scripts/stop_dashboard.sh` keeps history and `--reset` deletes the
+`pgdata` volume. For the local path, stop the collector, notifier and Streamlit with `Ctrl+C` first.
+Deleting `.pgdata` is the documented reset: the next `scripts/start_cluster.sh` recreates an empty
+cluster and `scripts/setup_db.sh` rebuilds the schema and seed. `.env` is intentionally kept so the
+same passwords are reused.
 
 ## 13. Security notes
 
 - No credentials are committed: `.env` is gitignored, `.env.example` contains only `change-me`.
+- A script-generated `.env` is created with mode `0600` where the filesystem supports POSIX modes.
+  Git Bash and WSL's `/mnt/c` do not enforce them; there the start script prints a warning, and you
+  should restrict the file's NTFS ACL yourself, for example from Git Bash:
+  `icacls .env /inheritance:r /grant:r "$USERNAME:(R,W)"`.
 - SQL scripts take passwords as `psql` variables; no password literal appears in `sql/`.
 - `monitor.session_sample` stores only a 60-character statement excerpt and no credentials.
 - `pg_stat_activity` access is granted through `pg_monitor` (which includes `pg_read_all_stats`) to
