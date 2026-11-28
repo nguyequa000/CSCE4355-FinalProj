@@ -23,6 +23,8 @@ import sys
 import time
 from pathlib import Path
 
+import psycopg
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -112,19 +114,41 @@ def main() -> int:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         emit_targets.append(log_path.open("a", encoding="utf-8"))
 
-    conn = connect("monitor_collector", dbname=args.database,
-                   application_name="alert_notifier")
+    conn = None
     try:
         if args.interval is None:
+            conn = connect("monitor_collector", dbname=args.database,
+                           application_name="alert_notifier")
             notify_once(conn, emit)
             return 0
+
+        # Long-running mode: a database restart must not kill the notifier.
+        # Reconnect with a short backoff and keep the container alive.
         while True:
-            notify_once(conn, emit)
+            if conn is None or conn.closed:
+                try:
+                    conn = connect("monitor_collector", dbname=args.database,
+                                   application_name="alert_notifier")
+                except psycopg.Error as exc:
+                    print(f"notifier: database unavailable ({exc.__class__.__name__}); "
+                          "retrying in 5s", file=sys.stderr, flush=True)
+                    time.sleep(5)
+                    continue
+            try:
+                notify_once(conn, emit)
+            except psycopg.Error as exc:
+                print(f"notifier: connection lost ({exc.__class__.__name__}); "
+                      "reconnecting", file=sys.stderr, flush=True)
+                conn.close()
+                conn = None
+                time.sleep(2)
+                continue
             time.sleep(args.interval)
     except KeyboardInterrupt:
         return 0
     finally:
-        conn.close()
+        if conn is not None and not conn.closed:
+            conn.close()
         for fh in emit_targets:
             fh.close()
 

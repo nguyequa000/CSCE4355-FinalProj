@@ -1,5 +1,5 @@
 # T2 collector evidence - unattended fixed-cadence loop (final code)
-# repo: /c/Users/johnq/Documents/test/School/CSCE4355/Assignment_Instruction/Final_Project/.worktrees/subagent-sa-0-f1949463
+# repo: <WORKTREE-REDACTED>
 # command: python scripts/collect.py --interval 60 --count 2 --db shopdb_t2
 # started: 2026-11-22T21:33:06-06:00
 collector: db=shopdb_t2 interval=60s count=2

@@ -1,0 +1,16 @@
+# Live connection_saturation demo on shopdb_sat, started 2026-11-22T23:07:42.416-06:00
+max_connections=100; threshold_value temporarily lowered to 0.05 (default 0.80) -> fires at >= 5 backends in this DB
+[baseline, no extra sessions] snapshot_id=1 captured_at=2026-11-22T23:07:42.805300-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+opened 6 extra shop_app sessions at 2026-11-22T23:07:43.153-06:00
+[with extra sessions] snapshot_id=2 captured_at=2026-11-22T23:07:44.498880-06:00 sessions=7 lock_edges=0 alerts_opened=1 alerts_resolved=0 evaluate_alerts=present
+closed extra sessions at 2026-11-22T23:07:44.593-06:00
+[after closing] snapshot_id=3 captured_at=2026-11-22T23:07:46.496442-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=1 evaluate_alerts=present
+threshold_value restored to 0.80
+
+$ select alert_id, rule_name, severity, blocked_pid, fired_at, observed_seconds, resolved_at, status from monitor.v_alerts (as monitor_reader)
+(1, 'connection_saturation', 'warning', 0, datetime.datetime(2026, 11, 22, 23, 7, 44, 498880, tzinfo=zoneinfo.ZoneInfo(key='America/Chicago')), Decimal('0.0'), datetime.datetime(2026, 11, 22, 23, 7, 46, 496442, tzinfo=zoneinfo.ZoneInfo(key='America/Chicago')), 'resolved')
+
+$ numbackends per snapshot (monitor.v_db_stats)
+(1, datetime.datetime(2026, 11, 22, 23, 7, 42, 805300, tzinfo=zoneinfo.ZoneInfo(key='America/Chicago')), 2)
+(2, datetime.datetime(2026, 11, 22, 23, 7, 44, 498880, tzinfo=zoneinfo.ZoneInfo(key='America/Chicago')), 8)
+(3, datetime.datetime(2026, 11, 22, 23, 7, 46, 496442, tzinfo=zoneinfo.ZoneInfo(key='America/Chicago')), 2)

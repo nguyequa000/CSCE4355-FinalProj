@@ -1,0 +1,163 @@
+Missing-index demo -- shop.orders on shopdb_bench
+Started: 2026-11-22 22:48:22 CST
+Server: PostgreSQL 17.11 on x86_64-windows, compiled by msvc-19.44.35228, 64-bit
+Query: SELECT count(*), sum(total_amount) FROM shop.orders WHERE status='paid' AND ordered_at >= '2026-02-03' AND ordered_at < '2026-02-04';
+Seeded indexes: PK + orders_customer_id_idx only (sql/01_shop.sql)
+
+Pager usage is off.
+Timing is off.
+=== indexes on shop.orders BEFORE ===
+       indexname        |                                   indexdef                                   
+------------------------+------------------------------------------------------------------------------
+ orders_customer_id_idx | CREATE INDEX orders_customer_id_idx ON shop.orders USING btree (customer_id)
+ orders_pkey            | CREATE UNIQUE INDEX orders_pkey ON shop.orders USING btree (order_id)
+(2 rows)
+
+
+=== query under test (no supporting index) ===
+ count | total_amount 
+-------+--------------
+   360 |     89338.80
+(1 row)
+
+
+=== BEFORE 1/3 ===
+                                                                                       QUERY PLAN                                                                                       
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=253.80..253.81 rows=1 width=40) (actual time=0.486..0.486 rows=1 loops=1)
+   Buffers: shared hit=77
+   ->  Seq Scan on orders  (cost=0.00..252.00 rows=360 width=6) (actual time=0.133..0.461 rows=360 loops=1)
+         Filter: ((ordered_at >= '2026-02-03 00:00:00-06'::timestamp with time zone) AND (ordered_at < '2026-02-04 00:00:00-06'::timestamp with time zone) AND (status = 'paid'::text))
+         Rows Removed by Filter: 9640
+         Buffers: shared hit=77
+ Planning Time: 0.052 ms
+ Execution Time: 0.498 ms
+(8 rows)
+
+
+=== BEFORE 2/3 ===
+                                                                                       QUERY PLAN                                                                                       
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=253.80..253.81 rows=1 width=40) (actual time=0.421..0.421 rows=1 loops=1)
+   Buffers: shared hit=77
+   ->  Seq Scan on orders  (cost=0.00..252.00 rows=360 width=6) (actual time=0.105..0.397 rows=360 loops=1)
+         Filter: ((ordered_at >= '2026-02-03 00:00:00-06'::timestamp with time zone) AND (ordered_at < '2026-02-04 00:00:00-06'::timestamp with time zone) AND (status = 'paid'::text))
+         Rows Removed by Filter: 9640
+         Buffers: shared hit=77
+ Planning Time: 0.035 ms
+ Execution Time: 0.430 ms
+(8 rows)
+
+
+=== BEFORE 3/3 ===
+                                                                                       QUERY PLAN                                                                                       
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=253.80..253.81 rows=1 width=40) (actual time=0.620..0.620 rows=1 loops=1)
+   Buffers: shared hit=77
+   ->  Seq Scan on orders  (cost=0.00..252.00 rows=360 width=6) (actual time=0.164..0.587 rows=360 loops=1)
+         Filter: ((ordered_at >= '2026-02-03 00:00:00-06'::timestamp with time zone) AND (ordered_at < '2026-02-04 00:00:00-06'::timestamp with time zone) AND (status = 'paid'::text))
+         Rows Removed by Filter: 9640
+         Buffers: shared hit=77
+ Planning Time: 0.032 ms
+ Execution Time: 0.630 ms
+(8 rows)
+
+
+=== CREATE INDEX + ANALYZE ===
+psql:sql/30_missing_index_demo.sql:52: NOTICE:  index "orders_status_ordered_at_idx" does not exist, skipping
+DROP INDEX
+CREATE INDEX
+ANALYZE
+
+=== indexes on shop.orders AFTER CREATE ===
+          indexname           |                                         indexdef                                          
+------------------------------+-------------------------------------------------------------------------------------------
+ orders_customer_id_idx       | CREATE INDEX orders_customer_id_idx ON shop.orders USING btree (customer_id)
+ orders_pkey                  | CREATE UNIQUE INDEX orders_pkey ON shop.orders USING btree (order_id)
+ orders_status_ordered_at_idx | CREATE INDEX orders_status_ordered_at_idx ON shop.orders USING btree (status, ordered_at)
+(3 rows)
+
+
+=== AFTER 1/3 ===
+                                                                                            QUERY PLAN                                                                                            
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=97.98..97.99 rows=1 width=40) (actual time=0.150..0.150 rows=1 loops=1)
+   Buffers: shared hit=12 read=4
+   ->  Bitmap Heap Scan on orders  (cost=12.88..96.17 rows=360 width=6) (actual time=0.080..0.111 rows=360 loops=1)
+         Recheck Cond: ((status = 'paid'::text) AND (ordered_at >= '2026-02-03 00:00:00-06'::timestamp with time zone) AND (ordered_at < '2026-02-04 00:00:00-06'::timestamp with time zone))
+         Heap Blocks: exact=12
+         Buffers: shared hit=12 read=4
+         ->  Bitmap Index Scan on orders_status_ordered_at_idx  (cost=0.00..12.79 rows=360 width=0) (actual time=0.069..0.069 rows=360 loops=1)
+               Index Cond: ((status = 'paid'::text) AND (ordered_at >= '2026-02-03 00:00:00-06'::timestamp with time zone) AND (ordered_at < '2026-02-04 00:00:00-06'::timestamp with time zone))
+               Buffers: shared read=4
+ Planning:
+   Buffers: shared hit=15 read=1
+ Planning Time: 0.120 ms
+ Execution Time: 0.172 ms
+(13 rows)
+
+
+=== AFTER 2/3 ===
+                                                                                            QUERY PLAN                                                                                            
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=97.98..97.99 rows=1 width=40) (actual time=0.064..0.064 rows=1 loops=1)
+   Buffers: shared hit=16
+   ->  Bitmap Heap Scan on orders  (cost=12.88..96.17 rows=360 width=6) (actual time=0.020..0.040 rows=360 loops=1)
+         Recheck Cond: ((status = 'paid'::text) AND (ordered_at >= '2026-02-03 00:00:00-06'::timestamp with time zone) AND (ordered_at < '2026-02-04 00:00:00-06'::timestamp with time zone))
+         Heap Blocks: exact=12
+         Buffers: shared hit=16
+         ->  Bitmap Index Scan on orders_status_ordered_at_idx  (cost=0.00..12.79 rows=360 width=0) (actual time=0.015..0.015 rows=360 loops=1)
+               Index Cond: ((status = 'paid'::text) AND (ordered_at >= '2026-02-03 00:00:00-06'::timestamp with time zone) AND (ordered_at < '2026-02-04 00:00:00-06'::timestamp with time zone))
+               Buffers: shared hit=4
+ Planning Time: 0.039 ms
+ Execution Time: 0.074 ms
+(11 rows)
+
+
+=== AFTER 3/3 ===
+                                                                                            QUERY PLAN                                                                                            
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=97.98..97.99 rows=1 width=40) (actual time=0.064..0.064 rows=1 loops=1)
+   Buffers: shared hit=16
+   ->  Bitmap Heap Scan on orders  (cost=12.88..96.17 rows=360 width=6) (actual time=0.020..0.039 rows=360 loops=1)
+         Recheck Cond: ((status = 'paid'::text) AND (ordered_at >= '2026-02-03 00:00:00-06'::timestamp with time zone) AND (ordered_at < '2026-02-04 00:00:00-06'::timestamp with time zone))
+         Heap Blocks: exact=12
+         Buffers: shared hit=16
+         ->  Bitmap Index Scan on orders_status_ordered_at_idx  (cost=0.00..12.79 rows=360 width=0) (actual time=0.015..0.015 rows=360 loops=1)
+               Index Cond: ((status = 'paid'::text) AND (ordered_at >= '2026-02-03 00:00:00-06'::timestamp with time zone) AND (ordered_at < '2026-02-04 00:00:00-06'::timestamp with time zone))
+               Buffers: shared hit=4
+ Planning Time: 0.038 ms
+ Execution Time: 0.074 ms
+(11 rows)
+
+
+=== DROP INDEX (leave schema as seeded) ===
+DROP INDEX
+       indexname        |                                   indexdef                                   
+------------------------+------------------------------------------------------------------------------
+ orders_customer_id_idx | CREATE INDEX orders_customer_id_idx ON shop.orders USING btree (customer_id)
+ orders_pkey            | CREATE UNIQUE INDEX orders_pkey ON shop.orders USING btree (order_id)
+(2 rows)
+
+
+==================================================================
+SUMMARY -- identical query and data, 3 runs before / 3 after
+
+run        plan                                                      exec_ms buffers
+before-1   Aggregate -> Seq Scan on orders                             0.498 shared hit=77
+before-2   Aggregate -> Seq Scan on orders                             0.430 shared hit=77
+before-3   Aggregate -> Seq Scan on orders                             0.630 shared hit=77
+after-1    Aggregate -> Bitmap Heap Scan -> Bitmap Index Scan          0.172 hit=15 read=1 (heap hit=12 read=4; index read=4)
+after-2    Aggregate -> Bitmap Heap Scan -> Bitmap Index Scan          0.074 shared hit=16
+after-3    Aggregate -> Bitmap Heap Scan -> Bitmap Index Scan          0.074 shared hit=16
+
+mean before: 0.519 ms   mean after: 0.107 ms   difference: -79.4 %
+rows matched: 360 of 10000; rows removed by filter before: 9640
+index created: shop.orders_status_ordered_at_idx (status, ordered_at); ANALYZE shop.orders
+index DROPPED after the runs; pg_indexes for shop.orders is back to
+orders_pkey and orders_customer_id_idx (see tail of this file).
+
+Caveats: 10k-row seeded table, warm shared buffers, single session,
+other agents may share the host. Times are observed wall-clock
+execution times from EXPLAIN (ANALYZE, BUFFERS); no significance claim.
+Finished: 2026-11-22 22:48:40 CST

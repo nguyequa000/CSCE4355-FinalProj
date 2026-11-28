@@ -14,7 +14,7 @@ waiter_pid=2892 injection=2026-11-23T03:36:41.147+00:00 (blocked by blocker_pid=
 holding for 45s ...
 release=2026-11-23T03:37:26.146+00:00
 waiter_finished=2026-11-23T03:37:26.146+00:00 ok=true
-event_log=C:\Users\johnq\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.worktrees\subagent-sa-1-0b387086\docs\results\t3_lock_demo_events.jsonl
+event_log=<WORKTREE-REDACTED>\docs\results\t3_lock_demo_events.jsonl
 
 # recovery sample snapshot=2 captured_at=2026-11-22T21:38:42.570676-06:00 lock_wait_rows=0 -> evaluate_alerts opened=0 resolved=1
 

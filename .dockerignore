@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+.venv
+.pgdata
+.worktrees
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+docs/results
+*.docx
+*.pdf

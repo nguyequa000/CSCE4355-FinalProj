@@ -174,6 +174,43 @@ def repeat_header(row) -> None:
     tr_pr.append(el)
 
 
+def set_table_layout(table, ncols: int) -> None:
+    """Keep rows on one page and give each table a usable fixed geometry.
+
+    Word/LibreOffice otherwise autofit every column to the same width and let a
+    row split across a page boundary, which makes the wide evidence tables hard
+    to read.  Widths are proportional to the content type; the total is 6.5 in,
+    matching the page text width.
+    """
+    profiles = {
+        2: [1.25, 5.25],
+        3: [1.35, 1.75, 3.40],
+        4: [1.05, 1.55, 1.85, 2.05],
+        5: [0.40, 0.95, 1.20, 2.95, 1.00],
+        6: [0.35, 0.80, 1.00, 1.10, 1.70, 1.55],
+    }
+    widths = profiles.get(ncols, [6.5 / ncols] * ncols)
+    scale = 6.5 / sum(widths)
+    widths = [w * scale for w in widths]
+
+    table.autofit = False
+    tbl_pr = table._tbl.tblPr
+    layout = OxmlElement("w:tblLayout")
+    layout.set(qn("w:type"), "fixed")
+    tbl_pr.append(layout)
+    tbl_w = OxmlElement("w:tblW")
+    tbl_w.set(qn("w:w"), str(int(6.5 * 1440)))
+    tbl_w.set(qn("w:type"), "dxa")
+    tbl_pr.append(tbl_w)
+
+    for row in table.rows:
+        tr_pr = row._tr.get_or_add_trPr()
+        cant_split = OxmlElement("w:cantSplit")
+        tr_pr.append(cant_split)
+        for idx, width in enumerate(widths):
+            row.cells[idx].width = Inches(width)
+
+
 def set_cell_text(cell, text: str, bold: bool = False) -> None:
     cell.text = ""
     paragraph = cell.paragraphs[0]
@@ -359,7 +396,7 @@ def build(source: Path, output: Path) -> dict[str, int]:
             table = doc.add_table(rows=1, cols=len(header))
             table.style = "Table Grid"
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
-            table.autofit = True
+            set_table_layout(table, len(header))
             hdr = table.rows[0]
             for idx, cell_text in enumerate(header):
                 set_cell_text(hdr.cells[idx], cell_text, bold=True)

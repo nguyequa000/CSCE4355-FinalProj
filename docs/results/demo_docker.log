@@ -1,0 +1,7 @@
+ Container pg-monitoring-postgres-1  Running
+blocker_pid=127 holds row customer_id=42
+waiter_pid=128 injection=2026-11-24T02:00:40.864+00:00 (blocked by blocker_pid=127)
+holding for 120s ...
+release=2026-11-24T02:02:40.866+00:00
+waiter_finished=2026-11-24T02:02:40.868+00:00 ok=true
+event_log=/app/docs/results/lock_demo_events.jsonl

@@ -1,0 +1,85 @@
+# PostgreSQL 16 Docker stack verification
+# Captured 2026-11-23 22:15 CST (2026-11-24 04:15 UTC) from the running pg-monitoring stack.
+# Host: Windows 11; Docker Engine in WSL 2; compose project pg-monitoring.
+
+$ docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}'
+pg-monitoring-dashboard-1|csce4355/app:1|Up 2 hours (healthy)|127.0.0.1:8501->8501/tcp
+pg-monitoring-notifier-1|csce4355/app:1|Up 2 hours|8501/tcp
+pg-monitoring-postgres-1|csce4355/postgres-monitor:16|Up 2 hours (healthy)|127.0.0.1:55432->5432/tcp
+
+$ curl -fsS http://127.0.0.1:8501/_stcore/health
+ok
+
+$ select version();
+version                                                            
+------------------------------------------------------------------------------------------------------------------------------
+ PostgreSQL 16.16 (Debian 16.16-1.pgdg12+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14+deb12u1) 12.2.0, 64-bit
+(1 row)
+$ extensions, max_connections, active cron job count
+extname       | extversion 
+--------------------+------------
+ pg_cron            | 1.6
+ pg_stat_statements | 1.10
+ plpgsql            | 1.0
+(3 rows)
+
+ max_connections 
+-----------------
+ 100
+(1 row)
+
+ active_cron_jobs 
+------------------
+                4
+(1 row)
+
+$ select jobid, jobname, schedule, active from cron.job order by jobid;
+jobid |         jobname          |  schedule  | active 
+-------+--------------------------+------------+--------
+     1 | monitor_capture_snapshot | * * * * *  | t
+     2 | monitor_purge_snapshots  | 17 3 * * * | t
+     3 | monitor_refresh_rollup   | 2 * * * *  | t
+     4 | cron_history_cleanup     | 29 3 * * * | t
+(4 rows)
+
+$ select rule_name, threshold_seconds, threshold_value, severity, enabled from monitor.alert_rule order by rule_name;
+rule_name       | threshold_seconds | threshold_value | severity | enabled 
+-----------------------+-------------------+-----------------+----------+---------
+ blocked_session       |                30 |                 | critical | t
+ cache_hit_ratio       |                 0 |            0.90 | warning  | t
+ connection_saturation |                 0 |            0.80 | warning  | t
+ dead_tuple_risk       |                 0 |            0.20 | warning  | t
+ idle_in_transaction   |                60 |                 | warning  | t
+ long_active_query     |                60 |                 | warning  | t
+(6 rows)
+
+$ select alert_id, rule_name, severity, blocked_pid, blocker_pid, first_seen_at, eligible_at, fired_at, observed_seconds, resolved_at, notified_at, resolve_notified_at from monitor.alert_log order by alert_id;
+alert_id |      rule_name      | severity | blocked_pid | blocker_pid |         first_seen_at         |          eligible_at          |           fired_at            | observed_seconds |          resolved_at          |          notified_at          |      resolve_notified_at      
+----------+---------------------+----------+-------------+-------------+-------------------------------+-------------------------------+-------------------------------+------------------+-------------------------------+-------------------------------+-------------------------------
+        1 | blocked_session     | critical |         128 |         127 | 2026-11-24 02:00:40.812741+00 | 2026-11-24 02:01:10.812741+00 | 2026-11-24 02:02:00.004907+00 |             79.2 | 2026-11-24 02:04:00.006921+00 | 2026-11-24 02:02:27.940929+00 | 2026-11-24 02:04:24.188891+00
+        2 | idle_in_transaction | warning  |         127 |         127 | 2026-11-24 02:00:40.864804+00 | 2026-11-24 02:01:40.864804+00 | 2026-11-24 02:02:00.004907+00 |             79.1 | 2026-11-24 02:04:00.006921+00 | 2026-11-24 02:02:27.940929+00 | 2026-11-24 02:04:24.188891+00
+(2 rows)
+
+$ snapshot coverage and gaps
+snapshots |        first_snapshot         |         last_snapshot         | gaps_over_90s |     max_gap     
+-----------+-------------------------------+-------------------------------+---------------+-----------------
+       135 | 2026-11-24 02:00:00.017574+00 | 2026-11-24 04:15:00.005283+00 |             1 | 00:02:00.002014
+(1 row)
+
+$ gaps over 90 s
+snapshot_id |          captured_at          |        d        
+-------------+-------------------------------+-----------------
+           4 | 2026-11-24 02:04:00.006921+00 | 00:02:00.002014
+(1 row)
+
+$ monitor object counts (11 tables, 12 views)
+tables | views | shop_tables 
+--------+-------+-------------
+     11 |    12 |           6
+(1 row)
+
+$ alert state now
+total | open 
+-------+------
+     2 |    0
+(1 row)

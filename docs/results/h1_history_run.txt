@@ -1,0 +1,77 @@
+H1 history lane - real collector run and reader views
+database: shopdb_h1 (created with: bash scripts/setup_db.sh shopdb_h1)
+client: .venv/Scripts/python.exe on the project venv (PostgreSQL 17.11)
+
+State before the run: the database already held the two snapshots left by
+tests/test_history.py's retention test - snapshot 2 was backdated 30 days and
+has an alert row pointing at it (purge_history keeps alert-referenced snapshots
+by design), snapshot 3 is recent.  The run below adds snapshots 4-6, so the
+2026-10-23 hour in the rollup is that backdated test snapshot plus its alert.
+
+== 0. version and history objects (queried as monitor_collector) ==
+server_version | pg_stat_statements | collect_extra                 | purge_history                   | table_stat_sample         | statement_sample
+---------------+--------------------+-------------------------------+---------------------------------+---------------------------+-------------------------
+17.11          | 1.11               | monitor.collect_extra(bigint) | monitor.purge_history(interval) | monitor.table_stat_sample | monitor.statement_sample
+(1 row)
+
+== 1. collector: .venv/Scripts/python.exe scripts/collect.py --interval 10 --count 3 --db shopdb_h1 ==
+$ .venv/Scripts/python.exe scripts/collect.py --interval 10 --count 3 --db shopdb_h1
+snapshot_id=4 captured_at=2026-11-22T22:47:58.178908-06:00 sessions=2 lock_edges=0 alerts_opened=0 alerts_resolved=1 evaluate_alerts=present
+snapshot_id=5 captured_at=2026-11-22T22:48:08.149841-06:00 sessions=2 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+snapshot_id=6 captured_at=2026-11-22T22:48:18.144629-06:00 sessions=2 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present
+--- stderr ---
+collector: db=shopdb_h1 interval=10s count=3
+exit code: 0
+shop_app statements committed during the run: 63
+
+== 2. reader queries: the three new views (monitor_reader) ==
+-- monitor.v_hourly_rollup --
+hour                      | snapshots | max_lock_edges | max_sessions | xact_commit_delta_sum | blks_hit_ratio | alerts_fired
+--------------------------+-----------+----------------+--------------+-----------------------+----------------+-------------
+2026-10-23 22:00:00-05:00 | 1         | 0              | 1            | 0                     | NULL           | 1
+2026-11-22 22:00:00-06:00 | 4         | 0              | 2            | 116                   | 0.9986         | 0
+(2 rows)
+
+-- monitor.v_table_stats, newest snapshot --
+snapshot_id | schemaname | relname   | n_live_tup | n_dead_tup | dead_ratio | seq_scan | idx_scan
+------------+------------+-----------+------------+------------+------------+----------+---------
+6           | shop       | customers | 1000       | 4          | 0.0040     | 39       | 10022
+6           | shop       | orders    | 10000      | 1          | 0.0001     | 3        | 29
+(2 rows)
+
+-- monitor.v_statement_stats, newest snapshot, top deltas --
+snapshot_id | queryid              | calls_delta | exec_ms_delta | mean_exec_ms
+------------+----------------------+-------------+---------------+-------------
+6           | -5512780148917043459 | 10          | 0.940         | 0.090
+6           | -3715328574413121411 | 10          | 0.155         | 0.019
+6           | -2835399305386018931 | 10          | 0.004         | 0.000
+6           | 11701968915743190    | 10          | 0.011         | 0.001
+6           | 6039115506297427300  | 10          | 0.366         | 0.032
+6           | -7095639160671114663 | 3           | 0.016         | 0.012
+6           | -2835399305386018931 | 1           | 0.000         | 0.000
+6           | 11701968915743190    | 1           | 0.001         | 0.001
+(8 rows)
+
+-- statement rows stored per snapshot (no query text is stored) --
+snapshot_id | statements | with_calls_delta | min_calls_delta
+------------+------------+------------------+----------------
+2           | 102        | 102              | 0
+3           | 102        | 102              | 0
+4           | 114        | 102              | 0
+5           | 114        | 114              | 0
+6           | 114        | 114              | 0
+(5 rows)
+
+== 3. reader denied the base tables (SQLSTATE 42501) ==
+monitor.table_stat_sample: InsufficientPrivilege SQLSTATE=42501
+monitor.statement_sample: InsufficientPrivilege SQLSTATE=42501
+
+== 4. guard check: a database without pg_stat_statements still snapshots ==
+database h1_guard_probe: sql/10_monitor.sql + sql/12_history.sql applied,
+no sql/01_shop.sql, so no extension; one table public.probe_t (25 rows)
+$ .venv/Scripts/python.exe scripts/collect.py --once --db h1_guard_probe
+snapshot_id=1 captured_at=2026-11-22T22:48:41.791229-06:00 sessions=0 lock_edges=0 alerts_opened=na alerts_resolved=na evaluate_alerts=absent
+exit code: 0
+pg_stat_statements extension installed: 0
+snapshots stored: 1; statement_sample rows: 0; table_stat_sample rows for public.probe_t: 1
+dropped probe database h1_guard_probe

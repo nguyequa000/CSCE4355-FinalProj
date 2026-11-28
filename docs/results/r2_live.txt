@@ -1,0 +1,84 @@
+Lane R2 live evidence — connection_saturation, cache_hit_ratio, dead_tuple_risk
+Generated: 2026-11-22 22:46 CST on the disposable PG17 cluster at 127.0.0.1:55432
+Database: shopdb_r2 (separate from the live collector's shopdb)
+Schema: sql/01_shop.sql + sql/10_monitor.sql + sql/20_alerts.sql + sql/21_extra_rules.sql + sql/22_more_rules.sql
+Lane H1's sql/12_history.sql is not in this worktree, so a demo-only
+monitor.collect_extra(bigint) shim (same INSERT ... SELECT from pg_stat_user_tables)
+was installed in shopdb_r2 to fill monitor.table_stat_sample during collection.
+
+=== server / rule setup ===
+server=17.11 max_connections=100
+       rule_name       | threshold_seconds | threshold_value | severity | enabled 
+-----------------------+-------------------+-----------------+----------+---------
+ blocked_session       |                30 |                 | critical | t
+ cache_hit_ratio       |                 0 |             0.9 | warning  | t
+ connection_saturation |                 0 |             0.8 | warning  | t
+ dead_tuple_risk       |                 0 |             0.2 | warning  | t
+ idle_in_transaction   |                60 |                 | warning  | t
+ long_active_query     |                60 |                 | warning  | t
+(6 rows)
+
+
+=== 1. disable autovacuum on shop.orders, create dead tuples as shop_app ===
+ALTER TABLE
+{"action": "update", "table": "shop.orders", "rows": 3000}
+ relname | n_live_tup | n_dead_tup | dead_ratio 
+---------+------------+------------+------------
+ orders  |      10000 |       3000 |      0.231
+(1 row)
+
+
+=== 2. demo-only collect_extra shim for table_stat_sample ===
+collect_extra installed
+
+=== 3. collector snapshot with dead tuples present ===
+snapshot_id=3 captured_at=2026-11-22T22:46:42.514377-06:00 sessions=0 lock_edges=0 alerts_opened=1 alerts_resolved=1 evaluate_alerts=present
+
+=== 4. monitor_reader view of alerts (dead_tuple_risk open) ===
+ alert_id |    rule_name    |  status  | blocked_pid | blocker_pid | observed_seconds |           fired_at            |          resolved_at          
+----------+-----------------+----------+-------------+-------------+------------------+-------------------------------+-------------------------------
+        1 | dead_tuple_risk | resolved |       70001 |           0 |              0.0 | 2026-11-22 14:00:00-06        | 2026-11-22 22:46:42.514377-06
+        2 | dead_tuple_risk | open     |       24384 |           0 |              0.0 | 2026-11-22 22:46:42.514377-06 | 
+(2 rows)
+
+
+=== 5. VACUUM shop.orders as postgres, then next snapshot ===
+tuples: 3000 removed, 9940 remain, 0 are dead but not yet removable
+removable cutoff: 3947, which was 0 XIDs old when operation ended
+index scan needed: 23 pages from table (23.00% of total) had 3000 dead item identifiers removed
+tuples: 0 removed, 0 remain, 0 are dead but not yet removable
+removable cutoff: 3947, which was 0 XIDs old when operation ended
+index scan not needed: 0 pages from table (100.00% of total) had 0 dead item identifiers removed
+VACUUM
+ relname | n_live_tup | n_dead_tup 
+---------+------------+------------
+ orders  |       9940 |          0
+(1 row)
+
+snapshot_id=4 captured_at=2026-11-22T22:46:44.648441-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=1 evaluate_alerts=present
+
+=== 6. monitor_reader view after VACUUM (dead_tuple_risk resolved) ===
+ alert_id |    rule_name    |  status  | blocked_pid | observed_seconds |           fired_at            |          resolved_at          
+----------+-----------------+----------+-------------+------------------+-------------------------------+-------------------------------
+        1 | dead_tuple_risk | resolved |       70001 |              0.0 | 2026-11-22 14:00:00-06        | 2026-11-22 22:46:42.514377-06
+        2 | dead_tuple_risk | resolved |       24384 |              0.0 | 2026-11-22 22:46:42.514377-06 | 2026-11-22 22:46:44.648441-06
+(2 rows)
+
+==============================================================================
+Verification notes
+==============================================================================
+- alert_id 1 (blocked_pid 70001, fired_at 14:00-06 = 20:00 UTC) is a synthetic
+  row left behind by the pytest suite's last test in this same disposable
+  database; it used the test fixture's CAP timestamp. The live collector at
+  snapshot 3 found no table with that relid and resolved it. The real table in
+  shopdb_r2 is alert_id 2, blocked_pid 24384 = shop.orders.relid.
+- Live dead_tuple_risk cycle is real: snapshot 3 opened alert_id 2 when
+  pg_stat_user_tables showed 3000 dead tuples (dead ratio 0.231), VACUUM
+  removed them (n_dead_tup 0), and snapshot 4 resolved it (0 opened, 1 resolved).
+- cache_hit_ratio was unknown on these snapshots (fewer than 100 blocks in the
+  5-minute window), so it correctly neither opened nor resolved an alert.
+- connection_saturation was exercised by the synthetic pytest cases
+  (tests/test_more_rules.py::test_connection_saturation_*) against this database;
+  a separate live two-snapshot fire/resolve capture was not completed before
+  the commit deadline, so no output for it is claimed here.
+

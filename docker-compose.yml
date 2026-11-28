@@ -1,21 +1,42 @@
-# docker-compose.yml  (M1 - Dustin Dowell)
+# docker-compose.yml  (M1 - Dustin Dowell; app services added for the delivered dashboard)
 #
 # One-command environment from the proposal:
 #
 #   cp .env.example .env        # then replace every change-me
 #   docker compose up -d --build
 #
-# The first start of an empty `pgdata` volume runs every numbered script in
-# ./sql (roles, shop schema + small seed, monitor schema, collector, purge,
-# alerts, pg_cron jobs). pg_cron then calls monitor.capture_snapshot() every
-# minute; do NOT also run scripts/collect.py against the same database.
+# What comes up:
+#   postgres    PostgreSQL 16 + pg_stat_statements + pg_cron. The first start of
+#               an empty `pgdata` volume runs every numbered script in ./sql
+#               (roles, shop schema + seed, monitor schema, history, collector,
+#               purge, all six alert rules, pg_cron jobs). pg_cron then calls
+#               monitor.capture_snapshot() every minute; do NOT also run
+#               scripts/collect.py against the same database.
+#   dashboard  Streamlit read-only dashboard on http://localhost:8501
+#   notifier   console notifier: prints fired/resolved alerts every 30 s
+#   demo       optional lock-contention generator (profile "demo"):
+#                docker compose run --rm demo
 #
-# Host tools (dashboard, notifier, tests, workload/seed_data.py) connect exactly
-# as they do to the local cluster, because the port below is taken from .env:
-# PGHOST=127.0.0.1, PGPORT=55432.
+# Host tools (tests, workload/seed_data.py) can still connect to the published
+# port (PGHOST=127.0.0.1, PGPORT=55432); the app services use the compose
+# network (PGHOST=postgres, PGPORT=5432), so .env values for the host do not
+# reach them except through the explicit mappings below.
 #
 # Reset everything:  docker compose down -v
 name: pg-monitoring
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: docker/app/Dockerfile
+  image: csce4355/app:1
+
+x-app-env: &app-env
+  PGHOST: postgres
+  PGPORT: "5432"
+  PGDATABASE: ${PGDATABASE:-shopdb}
+  COLLECT_INTERVAL_SECONDS: ${COLLECT_INTERVAL_SECONDS:-60}
+  TZ: America/Chicago
 
 services:
   postgres:
@@ -51,6 +72,50 @@ services:
       retries: 30
       start_period: 30s
     restart: unless-stopped
+
+  dashboard:
+    <<: *app
+    environment:
+      <<: *app-env
+      MONITOR_READER_PASSWORD: ${MONITOR_READER_PASSWORD:?set MONITOR_READER_PASSWORD in .env}
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-8501}:8501"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  notifier:
+    image: csce4355/app:1
+    command: ["python", "notifier/notify.py", "--interval", "30"]
+    environment:
+      <<: *app-env
+      MONITOR_COLLECTOR_PASSWORD: ${MONITOR_COLLECTOR_PASSWORD:?set MONITOR_COLLECTOR_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # On-demand workload: creates one real row-lock wait so the dashboard and the
+  # blocked_session / idle_in_transaction rules have something to show.
+  #   docker compose run --rm demo
+  demo:
+    image: csce4355/app:1
+    profiles: ["demo"]
+    command: ["python", "workload/lock_demo.py", "--hold", "120"]
+    environment:
+      <<: *app-env
+      SHOP_APP_PASSWORD: ${SHOP_APP_PASSWORD:?set SHOP_APP_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # Optional Grafana from the proposal (M7). The team's delivered dashboard is
   # Streamlit (dashboard/app.py), so Grafana only starts when asked for:
