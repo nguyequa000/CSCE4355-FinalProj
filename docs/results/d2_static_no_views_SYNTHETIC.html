@@ -1,0 +1,66 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>PostgreSQL Monitoring Dashboard (CSCE 4355)</title><style>
+    :root{color-scheme:light dark}
+    body{font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;margin:0;padding:24px 32px;
+         background:#f6f7f9;color:#14181f}
+    h1{font-size:22px;margin:0 0 4px} h2{font-size:16px;margin:26px 0 8px;border-bottom:1px solid #d8dce2;
+         padding-bottom:4px} .sub{color:#5b6472;margin:0 0 14px}
+    .cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+    .card{background:#fff;border:1px solid #dde1e7;border-radius:8px;padding:10px 16px;min-width:150px}
+    .card .k{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#68717f}
+    .card .v{font-size:18px;font-weight:600}
+    .banner{padding:9px 14px;border-radius:6px;margin:10px 0;font-weight:600}
+    .ok{background:#e7f6ec;color:#14532d;border:1px solid #b7e2c6}
+    .warn{background:#fff6e0;color:#7a4b00;border:1px solid #f0d79a}
+    .bad{background:#fdeaea;color:#8a1c1c;border:1px solid #efb9b9}
+    table.tbl{border-collapse:collapse;background:#fff;font-size:12.5px;width:100%;margin:6px 0 4px}
+    table.tbl th{background:#eef1f5;text-align:left;padding:6px 8px;border:1px solid #dde1e7;font-weight:600}
+    table.tbl td{padding:5px 8px;border:1px solid #e7eaef;vertical-align:top}
+    table.tbl tr:nth-child(even) td{background:#fafbfc}
+    .openbox{background:#fdeaea;border:1px solid #efb9b9;border-radius:7px;padding:8px 12px;margin:6px 0}
+    .openbox table.tbl th{background:#f8d7d7}
+    .empty{color:#68717f;font-style:italic}
+    .hbar{display:flex;align-items:center;gap:8px;margin:3px 0;font-size:12px}
+    .hbar .lab{width:96px;color:#4a5464} .hbar .track{flex:1;background:#e9edf2;height:11px;border-radius:3px}
+    .hbar .track i{display:block;height:11px;background:#3f6fb5;border-radius:3px}
+    .bar{position:relative;display:flex;align-items:center;gap:6px;min-width:90px}
+    .bar span{background:#3f6fb5;height:9px;border-radius:2px;display:inline-block;min-width:2px}
+    footer{margin-top:26px;color:#68717f;font-size:11.5px}
+    </style></head><body>
+<h1>PostgreSQL Monitoring Dashboard (CSCE 4355)</h1>
+<p class="sub">Static fallback render · read-only role <code>monitor_reader</code>
+ · times America/Chicago (CT) · generated 2026-11-22 22:56:05 CST</p>
+<div class="cards">
+  <div class="card"><div class="k">Database</div><div class="v">shopdb_d2b</div></div>
+  <div class="card"><div class="k">Connected role</div><div class="v">monitor_reader</div></div>
+  <div class="card"><div class="k">Latest snapshot</div><div class="v">none</div></div>
+  <div class="card"><div class="k">Snapshot age</div><div class="v">—</div></div>
+</div>
+<div class="banner warn">No snapshots yet — start the collector.</div>
+<h2>1 · Alerts</h2>
+<h3 style="font-size:13px;margin:8px 0 4px">Open alerts (0)</h3>
+<p class="empty">No open alerts.</p>
+<h3 style="font-size:13px;margin:14px 0 4px">Resolved alerts (0)</h3>
+<p class="empty">no rows</p>
+<h2>2 · Current blockers</h2>
+<div class="banner ok">No blocking at latest snapshot.</div>
+<h2>3 · Lock history (last 0 snapshots)</h2>
+<p class="empty">no lock waits</p>
+<h3 style="font-size:13px;margin:14px 0 4px">Lock edges per snapshot</h3>
+<p class="empty">no lock waits in window</p>
+<h2>4 · Session state and database counters</h2>
+<h3 style="font-size:13px;margin:8px 0 4px">Session state counts per snapshot</h3>
+<p class="empty">no session samples</p>
+<h3 style="font-size:13px;margin:14px 0 4px">Database counters (delta = unknown means no comparable previous sample)</h3>
+<p class="empty">no rows</p>
+<h2>5 · Table health</h2>
+<div class="banner warn">Table health: monitor.v_table_stats not available in this database.</div>
+<h2>6 · Top statements by total execution time</h2>
+<p class="sub" style="margin:0 0 6px">Latest snapshot, ordered by total_exec_time_delta · queryid only (no SQL text is stored).</p>
+<div class="banner warn">Top statements: monitor.v_statement_stats not available in this database.</div>
+<h2>7 · Hourly rollup</h2>
+<div class="banner warn">Hourly rollup: monitor.v_hourly_rollup not available in this database.</div>
+<footer>Source: monitor.v_snapshot, v_session_history, v_lock_history, v_current_blockers,
+v_db_stats, v_alerts — plus v_table_stats, v_statement_stats, v_hourly_rollup when present —
+as monitor_reader (SELECT only). Streamlit replacement of dashboard/app.py.</footer>
+</body></html>

@@ -1,0 +1,15 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.2.0, pluggy-1.7.0 -- HOME_REDACTED\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: <WORKTREE-REDACTED>
+plugins: anyio-4.16.0
+collecting ... collected 6 items
+
+tests/test_history.py::test_table_history_records_shop_tables_not_monitor PASSED [ 16%]
+tests/test_history.py::test_statement_history_stores_no_query_text PASSED [ 33%]
+tests/test_history.py::test_statement_history_deltas_null_first_then_non_negative PASSED [ 50%]
+tests/test_history.py::test_reader_can_select_history_views_but_not_base_tables PASSED [ 66%]
+tests/test_history.py::test_hourly_rollup_aggregates_snapshots PASSED    [ 83%]
+tests/test_history.py::test_purge_history_drops_old_snapshots_but_keeps_alert_referenced PASSED [100%]
+
+============================== 6 passed in 0.55s ==============================

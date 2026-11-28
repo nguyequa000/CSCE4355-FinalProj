@@ -1,4 +1,4 @@
 mode=long pid=31668 hold=100s
 pid=31668 state=active query=pg_sleep start=2026-11-23T03:56:44.396+00:00
 pid=31668 end=2026-11-23T03:58:24.398+00:00 ok=true
-event_log=C:\Users\johnq\Documents\test\School\CSCE4355\Assignment_Instruction\Final_Project\.worktrees\subagent-sa-1-3be78978\docs\results\t5_session_demo.jsonl
+event_log=<WORKTREE-REDACTED>\docs\results\t5_session_demo.jsonl

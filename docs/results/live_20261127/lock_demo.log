@@ -1,0 +1,6 @@
+blocker_pid=15100 holds row customer_id=42
+waiter_pid=26496 injection=2026-11-28T02:25:53.474+00:00 (blocked by blocker_pid=15100)
+holding for 150s ...
+release=2026-11-28T02:28:23.475+00:00
+waiter_finished=2026-11-28T02:28:23.476+00:00 ok=true
+event_log=C:\Users\zacha\finalProj\CSCE4355-FinalProj\docs\results\live_20261127\lock_demo_events.jsonl

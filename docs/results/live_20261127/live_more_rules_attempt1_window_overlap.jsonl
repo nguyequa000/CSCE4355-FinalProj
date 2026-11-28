@@ -1,0 +1,34 @@
+{"t": "2026-11-27T20:30:00.957-06:00", "event": "run_start", "database": "shopdb_demo", "server": "PostgreSQL 17.12 on x86_64-windows, compiled by msvc-19.44.35230, 64-bit"}
+{"t": "2026-11-27T20:30:00.957-06:00", "event": "scenario_start", "rule": "dead_tuple_risk"}
+{"t": "2026-11-27T20:30:01.140-06:00", "event": "snapshot", "snapshot_id": 6, "captured_at": "2026-11-27 20:30:00.991231-06:00", "opened": 0, "resolved": 0}
+{"t": "2026-11-27T20:30:01.172-06:00", "event": "PASS", "check": "dead_tuple_risk: no alert before the workload"}
+{"action": "update", "table": "shop.orders", "rows": 3000}
+{"t": "2026-11-27T20:30:03.910-06:00", "event": "snapshot", "snapshot_id": 7, "captured_at": "2026-11-27 20:30:03.767157-06:00", "opened": 1, "resolved": 0}
+{"t": "2026-11-27T20:30:03.943-06:00", "event": "PASS", "check": "dead_tuple_risk: opens on the violating snapshot", "alerts": [{"alert_id": 3, "rule": "dead_tuple_risk", "severity": "warning", "key": 44247, "fired_at": "2026-11-27 20:30:03.767157-06:00", "resolved_at": null, "fired_snapshot": 7, "resolved_snapshot": null}]}
+{"t": "2026-11-27T20:30:06.155-06:00", "event": "snapshot", "snapshot_id": 8, "captured_at": "2026-11-27 20:30:06.016503-06:00", "opened": 0, "resolved": 1}
+{"t": "2026-11-27T20:30:06.189-06:00", "event": "PASS", "check": "dead_tuple_risk: resolves after VACUUM", "alerts": [{"alert_id": 3, "rule": "dead_tuple_risk", "severity": "warning", "key": 44247, "fired_at": "2026-11-27 20:30:03.767157-06:00", "resolved_at": "2026-11-27 20:30:06.016503-06:00", "fired_snapshot": 7, "resolved_snapshot": 8}]}
+{"t": "2026-11-27T20:30:06.189-06:00", "event": "scenario_start", "rule": "connection_saturation"}
+{"t": "2026-11-27T20:30:06.394-06:00", "event": "snapshot", "snapshot_id": 9, "captured_at": "2026-11-27 20:30:06.254243-06:00", "opened": 0, "resolved": 0}
+{"t": "2026-11-27T20:30:06.427-06:00", "event": "PASS", "check": "connection_saturation: no alert at idle"}
+{"t": "2026-11-27T20:30:09.190-06:00", "event": "connections_open", "count": 80, "max_connections": 100}
+{"t": "2026-11-27T20:30:10.379-06:00", "event": "snapshot", "snapshot_id": 10, "captured_at": "2026-11-27 20:30:10.226424-06:00", "opened": 1, "resolved": 0}
+{"t": "2026-11-27T20:30:10.413-06:00", "event": "PASS", "check": "connection_saturation: opens at >= 80 % of max_connections", "alerts": [{"alert_id": 4, "rule": "connection_saturation", "severity": "warning", "key": 0, "fired_at": "2026-11-27 20:30:10.226424-06:00", "resolved_at": null, "fired_snapshot": 10, "resolved_snapshot": null}]}
+{"t": "2026-11-27T20:30:10.417-06:00", "event": "connections_closed", "count": 80}
+{"t": "2026-11-27T20:30:12.095-06:00", "event": "snapshot", "snapshot_id": 11, "captured_at": "2026-11-27 20:30:11.952818-06:00", "opened": 0, "resolved": 1}
+{"t": "2026-11-27T20:30:12.127-06:00", "event": "PASS", "check": "connection_saturation: resolves after the connections close", "alerts": [{"alert_id": 4, "rule": "connection_saturation", "severity": "warning", "key": 0, "fired_at": "2026-11-27 20:30:10.226424-06:00", "resolved_at": "2026-11-27 20:30:11.952818-06:00", "fired_snapshot": 10, "resolved_snapshot": 11}]}
+{"t": "2026-11-27T20:30:12.129-06:00", "event": "scenario_start", "rule": "cache_hit_ratio"}
+{"t": "2026-11-27T20:30:24.970-06:00", "event": "scratch_table_ready", "megabytes": 145}
+{"t": "2026-11-27T20:30:25.152-06:00", "event": "snapshot", "snapshot_id": 12, "captured_at": "2026-11-27 20:30:25.006106-06:00", "opened": 0, "resolved": 0}
+{"t": "2026-11-27T20:30:25.185-06:00", "event": "PASS", "check": "cache_hit_ratio: no alert at baseline"}
+{"t": "2026-11-27T20:30:25.186-06:00", "event": "cluster_restart", "reason": "empty shared buffers so the next scan reads from disk"}
+{"t": "2026-11-27T20:30:28.247-06:00", "event": "snapshot", "snapshot_id": 13, "captured_at": "2026-11-27 20:30:28.084179-06:00", "opened": 0, "resolved": 0}
+{"t": "2026-11-27T20:30:28.284-06:00", "event": "FAIL", "check": "cache_hit_ratio: opens after a cold-cache scan", "alerts": []}
+{"t": "2026-11-27T20:30:28.284-06:00", "event": "recovery_load", "profile": "read", "seconds": 20, "attempt": 1}
+{"t": "2026-11-27T20:30:50.614-06:00", "event": "snapshot", "snapshot_id": 14, "captured_at": "2026-11-27 20:30:50.456622-06:00", "opened": 0, "resolved": 0}
+{"t": "2026-11-27T20:30:50.649-06:00", "event": "recovery_load", "profile": "read", "seconds": 20, "attempt": 2}
+{"t": "2026-11-27T20:31:12.954-06:00", "event": "snapshot", "snapshot_id": 15, "captured_at": "2026-11-27 20:31:12.804178-06:00", "opened": 0, "resolved": 0}
+{"t": "2026-11-27T20:31:12.988-06:00", "event": "recovery_load", "profile": "read", "seconds": 20, "attempt": 3}
+{"t": "2026-11-27T20:31:35.398-06:00", "event": "snapshot", "snapshot_id": 16, "captured_at": "2026-11-27 20:31:35.247634-06:00", "opened": 0, "resolved": 0}
+{"t": "2026-11-27T20:31:35.433-06:00", "event": "FAIL", "check": "cache_hit_ratio: resolves once cached reads dominate the 5-minute window", "alerts": []}
+{"t": "2026-11-27T20:31:35.490-06:00", "event": "scratch_table_dropped"}
+{"t": "2026-11-27T20:31:35.490-06:00", "event": "run_end", "failures": ["cache_hit_ratio: opens after a cold-cache scan", "cache_hit_ratio: resolves once cached reads dominate the 5-minute window"], "result": "FAIL"}
