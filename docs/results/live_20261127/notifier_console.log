@@ -1,0 +1,4 @@
+[ALERT FIRED] id=1 rule=blocked_session severity=critical blocked_pid=26496 blocker_pid=15100 fired_at=2026-11-27T20:26:44.169133-06:00 observed=50.8s
+[ALERT FIRED] id=2 rule=idle_in_transaction severity=warning blocked_pid=15100 blocker_pid=15100 fired_at=2026-11-27T20:27:44.163024-06:00 observed=110.7s
+[ALERT RESOLVED] id=1 resolved_at=2026-11-27T20:28:44.156193-06:00
+[ALERT RESOLVED] id=2 resolved_at=2026-11-27T20:28:44.156193-06:00

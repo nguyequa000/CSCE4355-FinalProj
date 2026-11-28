@@ -1,0 +1,6 @@
+collector: db=shopdb_demo interval=60s count=unlimited
+snapshot_id=1 captured_at=2026-11-27T20:25:44.202286-06:00 sessions=0 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present statements=147 tables=17 indexes=28
+snapshot_id=2 captured_at=2026-11-27T20:26:44.169133-06:00 sessions=3 lock_edges=1 alerts_opened=1 alerts_resolved=0 evaluate_alerts=present statements=202 tables=17 indexes=28
+snapshot_id=3 captured_at=2026-11-27T20:27:44.163024-06:00 sessions=3 lock_edges=1 alerts_opened=1 alerts_resolved=0 evaluate_alerts=present statements=206 tables=17 indexes=28
+snapshot_id=4 captured_at=2026-11-27T20:28:44.156193-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=2 evaluate_alerts=present statements=211 tables=17 indexes=28
+snapshot_id=5 captured_at=2026-11-27T20:29:44.155952-06:00 sessions=1 lock_edges=0 alerts_opened=0 alerts_resolved=0 evaluate_alerts=present statements=213 tables=17 indexes=28

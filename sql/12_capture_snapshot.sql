@@ -291,7 +291,7 @@ BEGIN
         PERFORM monitor.collect_extra(v_sid);
     END IF;
 
-    -- 8. alert rules (Zach's module), same transaction as the rows they read ---
+    -- 8. alert rules (Zac's module), same transaction as the rows they read ---
     IF to_regprocedure('monitor.evaluate_alerts(bigint)') IS NOT NULL THEN
         SELECT e.opened, e.resolved INTO v_opened, v_resolved
           FROM monitor.evaluate_alerts(v_sid) e;

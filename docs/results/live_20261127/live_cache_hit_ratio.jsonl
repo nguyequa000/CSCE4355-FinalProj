@@ -1,0 +1,13 @@
+{"t": "2026-11-27T20:37:12.742-06:00", "event": "run_start", "database": "shopdb_demo", "server": "PostgreSQL 17.12 on x86_64-windows, compiled by msvc-19.44.35230, 64-bit"}
+{"t": "2026-11-27T20:37:12.742-06:00", "event": "scenario_start", "rule": "cache_hit_ratio"}
+{"t": "2026-11-27T20:37:23.448-06:00", "event": "scratch_table_ready", "megabytes": 145}
+{"t": "2026-11-27T20:37:23.656-06:00", "event": "snapshot", "snapshot_id": 17, "captured_at": "2026-11-27 20:37:23.489778-06:00", "opened": 0, "resolved": 0}
+{"t": "2026-11-27T20:37:23.692-06:00", "event": "PASS", "check": "cache_hit_ratio: no alert at baseline"}
+{"t": "2026-11-27T20:37:23.694-06:00", "event": "cluster_restart", "reason": "empty shared buffers so the next scan reads from disk"}
+{"t": "2026-11-27T20:37:26.745-06:00", "event": "snapshot", "snapshot_id": 18, "captured_at": "2026-11-27 20:37:26.576151-06:00", "opened": 1, "resolved": 0}
+{"t": "2026-11-27T20:37:26.781-06:00", "event": "PASS", "check": "cache_hit_ratio: opens after a cold-cache scan", "alerts": [{"alert_id": 5, "rule": "cache_hit_ratio", "severity": "warning", "key": 0, "fired_at": "2026-11-27 20:37:26.576151-06:00", "resolved_at": null, "fired_snapshot": 18, "resolved_snapshot": null}]}
+{"t": "2026-11-27T20:37:26.781-06:00", "event": "recovery_load", "profile": "read", "seconds": 20, "attempt": 1}
+{"t": "2026-11-27T20:37:49.172-06:00", "event": "snapshot", "snapshot_id": 19, "captured_at": "2026-11-27 20:37:48.958869-06:00", "opened": 0, "resolved": 1}
+{"t": "2026-11-27T20:37:49.221-06:00", "event": "PASS", "check": "cache_hit_ratio: resolves once cached reads dominate the 5-minute window", "alerts": [{"alert_id": 5, "rule": "cache_hit_ratio", "severity": "warning", "key": 0, "fired_at": "2026-11-27 20:37:26.576151-06:00", "resolved_at": "2026-11-27 20:37:48.958869-06:00", "fired_snapshot": 18, "resolved_snapshot": 19}]}
+{"t": "2026-11-27T20:37:50.294-06:00", "event": "scratch_table_dropped"}
+{"t": "2026-11-27T20:37:50.294-06:00", "event": "run_end", "failures": [], "result": "PASS"}

@@ -6,7 +6,7 @@ CSCE 4355 — Database Administration
 
 Final Project Report
 
-Quan Nguyen · Dustin Dowell · Zach Riggle
+Quan Nguyen · Dustin Dowell · Zac Riggle
 
 November 23, 2026
 <!-- titlepage:end -->
@@ -687,6 +687,44 @@ The archived PG17 evidence supports the other four rules and the performance mea
 because it was run on a different server, host configuration and scheduler. The report keeps the
 two sets of numbers in separate tables for that reason.
 
+## 5.4 Merged-build re-run (2026-11-27)
+
+After the Docker-app work and the rule-pipeline work were merged, the merged tree was re-run on the
+local PostgreSQL 17.12 cluster to confirm that nothing regressed. The full suite passed on freshly
+rebuilt test databases (Figure 4, `docs/results/test_run_20261127_202522.txt`). A fresh database,
+`shopdb_demo`, was then built with `scripts/setup_db.sh`, and the collector (60 s), console notifier
+(15 s) and Streamlit dashboard were started against it before `workload/lock_demo.py --hold 150`
+injected a row-lock wait. All artifacts are in `docs/results/live_20261127/`.
+
+![Figure 4: The automated suite on the merged build: six suites, 51 tests, all passing on freshly rebuilt databases. Rendered from the captured console output.](../results/live_20261127/terminal_tests.png)
+
+The waiter (PID 26496) blocked on the blocker (PID 15100, `idle in transaction`) at 20:25:53.474
+CST. The next snapshot, at 20:26:44.169, stored the lock edge and opened `blocked_session` alert 1
+with an observed wait of 50.8 s; the snapshot after that opened `idle_in_transaction` alert 2 for
+the blocker (110.7 s). The lock was released at 20:28:23.475, and the next snapshot (20:28:44.156)
+resolved both alerts — 20.7 s after release. The notifier stamped each firing about 0.2 s after the
+snapshot that opened it and printed each transition once (Figure 5). The dashboard showed the same
+alert ID, PID pair and wait while the alert was open (Figure 6).
+
+![Figure 5: The three terminals of the merged-build demo: the lock workload, the collector's per-snapshot summary (lock_edges, alerts_opened, alerts_resolved) and the console notifier. Rendered from the captured logs in docs/results/live_20261127/.](../results/live_20261127/terminal_pipeline.png)
+
+![Figure 6: Dashboard overview at 20:27:05 CST, one snapshot after injection: one open blocked_session alert and the blocking pair 26496 / 15100 with a 50.8 s wait, read as monitor_reader.](../results/live_20261127/dashboard_open_overview.png)
+
+The three newer rules were then exercised on the same database with
+`workload/live_verify_more_rules.py --database shopdb_demo --no-rebuild`, at their shipped default
+thresholds and with every snapshot taken through `monitor.capture_snapshot()`. `dead_tuple_risk`
+(alert 3) and `connection_saturation` (alert 4) opened and resolved on the first attempt. The
+`cache_hit_ratio` check failed on that attempt
+(`docs/results/live_20261127/live_more_rules_attempt1_window_overlap.jsonl`): the rule judges a
+five-minute window, and the cached reads from the two scenarios run seconds earlier kept the ratio
+above 0.90 despite the cold scan. That is the reason the script rebuilds the database per scenario by
+default. After the window had cleared, the cache scenario was re-run alone and alert 5 opened after
+the cold-cache scan and resolved once cached reads dominated the window
+(`docs/results/live_20261127/live_cache_hit_ratio.jsonl`). Figure 7 shows all five alerts in the
+dashboard; `long_active_query`, the sixth rule, is covered by Section 5.2 and the automated suite.
+
+![Figure 7: The Alerts tab of the merged-build demo database after all scenarios: five resolved alerts from five different rules (blocked_session, idle_in_transaction, dead_tuple_risk, connection_saturation, cache_hit_ratio), none open, read as monitor_reader.](../results/live_20261127/dashboard_all_rules_resolved.png)
+
 # 6. Testing & Verification
 
 ## 6.1 Current PostgreSQL 16 Docker verification
@@ -756,7 +794,7 @@ separate.
 The 50-test run (50 passed in 24.43 s on a new Docker volume; 22:41 CST on 2026-11-23 / 04:41 UTC
 on 2026-11-24) is the team's own suite executed by the build environment; it is not a teammate's
 independent review. The fresh-clone reproduction was likewise driven by the team's automated
-tooling, not by a human teammate. No third party has yet reproduced the Docker build. Zach Riggle's
+tooling, not by a human teammate. No third party has yet reproduced the Docker build. The
 `tests/run_tests.py` runner (one command that rebuilds each suite's database and records a pass/fail
 table) produced the 51-test PG17 run in `docs/results/test_run_20261123_010716.txt`; it is the
 team's own suite, not an external review.
@@ -951,7 +989,7 @@ references can be checked from a clean clone.
 
 The recorded demonstration is outstanding. The contribution statement credits only work products
 that exist in the commit history: Quan's implementation and report, Dustin's committed modules, and
-Zach's test runner, collector fix and rule verification (Section 9). The AI-assistance disclosure is retained in Section 9 pending the course's clarification
+Zac's test runner, collector fix and rule verification (Section 9). The AI-assistance disclosure is retained in Section 9 pending the course's clarification
 of its policy; it is not omitted.
 
 # 9. Team Contributions
@@ -962,12 +1000,12 @@ Table 18: Module-based contributions. Work that has not produced a concrete arti
 |---|---|
 | Quan Nguyen | **Implementation:** Docker app integration (dashboard and notifier services, `scripts/start_dashboard.sh`, `stop_dashboard.sh`), roles and grants, `monitor` schema and views, collector integration, alert integration, notifier reconnect, live Docker demo and evidence, report builder. **Report:** architecture, database design, DBA implementation, evidence, verification, results and limitations sections; submission draft; README. **Video:** architecture, dashboard and live demo walkthrough — pending recording. |
 | Dustin Dowell | **Implementation — M1 environment:** `docker/postgres/Dockerfile`, PostgreSQL 16 + `pg_cron` configuration, Docker init script, `docker-compose.yml` postgres service, `.gitattributes`; six-table `shop` schema with deterministic seed and the intentional missing index (`sql/01_shop.sql`). **M2/M3 history and collector:** statement, table and index history (`sql/11_monitor_history.sql`), in-database `monitor.capture_snapshot()` (`sql/12_capture_snapshot.sql`), retention (`sql/13_purge.sql`), `pg_cron` jobs (`sql/90_cron_jobs.sql`), `tests/test_history.py`. **Report:** environment, `shop`/`monitor` design additions, data collection, retention and cron-job paragraphs. **Video:** environment start-up, schemas, roles, cron jobs and snapshot history — pending recording. |
-| Zach Riggle | **Implementation — alert pipeline fix:** found that the scheduled collector never called `monitor.evaluate_more_rules()` or `monitor.collect_extra()`, so `connection_saturation`, `cache_hit_ratio` and `dead_tuple_risk` could not fire from scheduled snapshots; wired them into `monitor.evaluate_alerts()` (`sql/20_alerts.sql`) and `monitor.capture_snapshot()` (`sql/12_capture_snapshot.sql`), with a regression test that the collector reaches them (`tests/test_more_rules.py`). **Verification:** `workload/live_verify_more_rules.py`, which rebuilds a database per rule, triggers each of the three rules organically at its default threshold, and checks open/resolve through `capture_snapshot()` (`docs/results/live_more_rules.txt`, 9/9 checks); `tests/run_tests.py`, the one-command runner that rebuilds each suite's database and records results (`docs/results/test_run_20261123_010716.txt`, 51 passed); fixed a fragile probe in `tests/test_history.py`. **Workload and performance:** `pgbench` read/write profiles (`workload/pgbench/*.sql`, `workload/run_pgbench.sh`); two collector-overhead runs with `scripts/bench_overhead.sh` (`docs/results/perf_overhead_run1.txt`, `_run2.txt`). **Reproducibility:** renamed `sql/12_history.sql` to `sql/14_history.sql` so `setup_db.sh` applies it after the collector function it extends. Commits `09dc502`, `101eb69`, `fd3f569`, `32fb1a0`. **Report/README:** README rule-status, test and evidence sections; the default-threshold evidence in Sections 5–7. **Video:** testing, alert verification and the test runner — pending recording. |
+| Zac Riggle | **Implementation — alert pipeline fix:** found that the scheduled collector never called `monitor.evaluate_more_rules()` or `monitor.collect_extra()`, so `connection_saturation`, `cache_hit_ratio` and `dead_tuple_risk` could not fire from scheduled snapshots; wired them into `monitor.evaluate_alerts()` (`sql/20_alerts.sql`) and `monitor.capture_snapshot()` (`sql/12_capture_snapshot.sql`), with a regression test that the collector reaches them (`tests/test_more_rules.py`). **Verification:** `workload/live_verify_more_rules.py`, which rebuilds a database per rule, triggers each of the three rules organically at its default threshold, and checks open/resolve through `capture_snapshot()` (`docs/results/live_more_rules.txt`, 9/9 checks); `tests/run_tests.py`, the one-command runner that rebuilds each suite's database and records results (`docs/results/test_run_20261123_010716.txt`, 51 passed); fixed a fragile probe in `tests/test_history.py`. **Workload and performance:** `pgbench` read/write profiles (`workload/pgbench/*.sql`, `workload/run_pgbench.sh`); two collector-overhead runs with `scripts/bench_overhead.sh` (`docs/results/perf_overhead_run1.txt`, `_run2.txt`). **Reproducibility:** renamed `sql/12_history.sql` to `sql/14_history.sql` so `setup_db.sh` applies it after the collector function it extends. Commits `09dc502`, `101eb69`, `fd3f569`, `32fb1a0`. **Report/README:** README rule-status, test and evidence sections; the default-threshold evidence in Sections 5–7. **Video:** testing, alert verification and the test runner — pending recording. |
 
 The proposal assigned modules differently (Dustin: environment and collector; Quan: workload, views
-and dashboard; Zach: alerting, notifier and reproducibility). The table records what was actually
+and dashboard; Zac: alerting, notifier and reproducibility). The table records what was actually
 built for this submission, not the original plan. Dustin's modules are evidenced by commits
-`12533b7` and `d69eec3`; Zach's by commits `09dc502`, `101eb69`, `fd3f569` and `32fb1a0` (merged as
+`12533b7` and `d69eec3`; Zac's by commits `09dc502`, `101eb69`, `fd3f569` and `32fb1a0` (merged as
 pull request #4). No contribution is claimed for a teammate without
 a concrete work product; where a task was proposed but not completed, it is marked pending.
 
